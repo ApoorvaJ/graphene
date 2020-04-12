@@ -7,3 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+winit = "0.20.0"
+ash = "0.29.0"
+image = "0.22"
+cgmath = "0.17.0"
+memoffset = "0.5.1" #TODO: Consider removing dependency
+

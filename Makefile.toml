@@ -1,0 +1,16 @@
+# Commands:
+# `cargo make` - Debug mode, watch
+# `cargo make release` - Release mode
+
+[tasks.build_debug]
+script = ["cargo build"]
+
+[tasks.build_release]
+script = ["cargo build --release"]
+
+[tasks.dev-test-flow]
+dependencies = ["build_debug"]
+watch = true
+
+[tasks.release]
+dependencies = ["build_release"]
