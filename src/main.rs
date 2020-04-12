@@ -171,7 +171,6 @@ impl VulkanApp {
         let (device, family_indices) = share::create_logical_device(
             &instance,
             physical_device,
-            &validation_layers,
             &DEVICE_EXTENSIONS,
             &surface_stuff,
         );

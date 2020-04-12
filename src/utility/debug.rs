@@ -1,6 +1,4 @@
-use ash::version::EntryV1_0;
 use ash::vk;
-
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::ptr;
@@ -28,12 +26,6 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     println!("[Debug]{}{}{:?}", severity, types, message);
 
     vk::FALSE
-}
-
-// TODO: Delete
-pub struct ValidationInfo {
-    pub is_enable: bool,
-    pub required_validation_layers: [&'static str; 1],
 }
 
 pub fn setup_debug_utils(
