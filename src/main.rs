@@ -1,10 +1,5 @@
 mod utility;
-use crate::{
-    utility::*,
-    utility::constants::*,
-    utility::debug::*,
-    utility::share,
-};
+use crate::{utility::constants::*, utility::debug::*, utility::share, utility::*};
 
 use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
@@ -33,10 +28,10 @@ struct VulkanApp {
     _entry: ash::Entry,
     validation_layers: Vec<String>,
     instance: ash::Instance,
-    surface_loader: ash::extensions::khr::Surface,
+    surface_ext_loader: ash::extensions::khr::Surface,
     surface: vk::SurfaceKHR,
-    debug_utils_loader: ash::extensions::ext::DebugUtils,
-    debug_merssager: vk::DebugUtilsMessengerEXT,
+    debug_utils_ext_loader: ash::extensions::ext::DebugUtils,
+    debug_messenger: vk::DebugUtilsMessengerEXT,
 
     _physical_device: vk::PhysicalDevice,
     device: ash::Device,
@@ -67,13 +62,13 @@ struct VulkanApp {
 
 impl VulkanApp {
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
-
         const WINDOW_TITLE: &str = "Hello Triangle";
         const WINDOW_WIDTH: u32 = 800;
         const WINDOW_HEIGHT: u32 = 600;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
+        const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
 
-        // Init window
+        // 1. Init window
         let window = {
             winit::window::WindowBuilder::new()
                 .with_title(WINDOW_TITLE)
@@ -81,11 +76,10 @@ impl VulkanApp {
                 .build(event_loop)
                 .expect("Failed to create window.")
         };
-        // Init Ash
+        // 2. Init Ash
         let entry = ash::Entry::new().unwrap();
-        // Create Vulkan instance
+        // 3. Create Vulkan instance
         let instance = {
-
             // Ensure that all desired validation layers are available
             if validation_layers.len() > 0 {
                 // Enumerate available validation layers
@@ -94,11 +88,16 @@ impl VulkanApp {
                     .expect("Failed to enumerate instance layers properties.");
                 // Iterate over all desired layers
                 for layer in validation_layers.iter() {
-                    let is_layer_found = layer_props.iter().any(|&prop| tools::vk_to_string(&prop.layer_name) == *layer);
+                    let is_layer_found = layer_props
+                        .iter()
+                        .any(|&prop| tools::vk_to_string(&prop.layer_name) == *layer);
                     if is_layer_found == false {
-                        panic!("Validation layer '{}' requested, but not found. \
+                        panic!(
+                            "Validation layer '{}' requested, but not found. \
                                (1) Install the Vulkan SDK and set up validation layers, \
-                               or (2) remove any validation layers in the Rust code.", layer);
+                               or (2) remove any validation layers in the Rust code.",
+                            layer
+                        );
                     }
                 }
             }
@@ -161,18 +160,40 @@ impl VulkanApp {
 
             instance
         };
+        // 4. Create surface
+        let surface = unsafe {
+            platforms::create_surface(&entry, &instance, &window)
+                .expect("Failed to create surface.")
+        };
+        let surface_ext_loader = ash::extensions::khr::Surface::new(&entry, &instance);
+        // 5. Debug messenger callback
+        let debug_utils_ext_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+        let debug_messenger = {
+            if ENABLE_DEBUG_MESSENGER_CALLBACK == false {
+                ash::vk::DebugUtilsMessengerEXT::null()
+            } else {
+                let messenger_ci = populate_debug_messenger_create_info();
+                let utils_messenger = unsafe {
+                    debug_utils_ext_loader
+                        .create_debug_utils_messenger(&messenger_ci, None)
+                        .expect("Debug Utils Callback")
+                };
 
-        let surface_stuff =
-            share::create_surface(&entry, &instance, &window, WINDOW_WIDTH, WINDOW_HEIGHT);
-        let (debug_utils_loader, debug_merssager) =
-            setup_debug_utils(validation_layers.len() > 0, &entry, &instance);
-        let physical_device =
-            share::pick_physical_device(&instance, &surface_stuff, &DEVICE_EXTENSIONS);
+                utils_messenger
+            }
+        };
+        let physical_device = share::pick_physical_device(
+            &instance,
+            surface,
+            &surface_ext_loader,
+            &DEVICE_EXTENSIONS,
+        );
         let (device, family_indices) = share::create_logical_device(
             &instance,
             physical_device,
             &DEVICE_EXTENSIONS,
-            &surface_stuff,
+            surface,
+            &surface_ext_loader,
         );
         let graphics_queue =
             unsafe { device.get_device_queue(family_indices.graphics_family.unwrap(), 0) };
@@ -183,7 +204,8 @@ impl VulkanApp {
             &device,
             physical_device,
             &window,
-            &surface_stuff,
+            surface,
+            &surface_ext_loader,
             &family_indices,
         );
         let swapchain_imageviews = share::v1::create_image_views(
@@ -221,10 +243,10 @@ impl VulkanApp {
             _entry: entry,
             validation_layers: validation_layers,
             instance,
-            surface: surface_stuff.surface,
-            surface_loader: surface_stuff.surface_loader,
-            debug_utils_loader,
-            debug_merssager,
+            surface: surface,
+            surface_ext_loader,
+            debug_utils_ext_loader,
+            debug_messenger,
 
             _physical_device: physical_device,
             device,
@@ -460,11 +482,11 @@ impl Drop for VulkanApp {
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain, None);
             self.device.destroy_device(None);
-            self.surface_loader.destroy_surface(self.surface, None);
+            self.surface_ext_loader.destroy_surface(self.surface, None);
 
             if self.validation_layers.len() > 0 {
-                self.debug_utils_loader
-                    .destroy_debug_utils_messenger(self.debug_merssager, None);
+                self.debug_utils_ext_loader
+                    .destroy_debug_utils_messenger(self.debug_messenger, None);
             }
             self.instance.destroy_instance(None);
         }

@@ -8,32 +8,12 @@ use ash::vk;
 
 use std::ptr;
 
-use crate::utility::platforms;
 use crate::utility::structures::*;
-
-pub fn create_surface(
-    entry: &ash::Entry,
-    instance: &ash::Instance,
-    window: &winit::window::Window,
-    screen_width: u32,
-    screen_height: u32,
-) -> SurfaceStuff {
-    let surface = unsafe {
-        platforms::create_surface(entry, instance, window).expect("Failed to create surface.")
-    };
-    let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
-
-    SurfaceStuff {
-        surface_loader,
-        surface,
-        screen_width,
-        screen_height,
-    }
-}
 
 pub fn pick_physical_device(
     instance: &ash::Instance,
-    surface_stuff: &SurfaceStuff,
+    surface: vk::SurfaceKHR,
+    surface_ext_loader: &ash::extensions::khr::Surface,
     required_device_extensions: &DeviceExtension,
 ) -> vk::PhysicalDevice {
     let physical_devices = unsafe {
@@ -46,7 +26,8 @@ pub fn pick_physical_device(
         let is_suitable = is_physical_device_suitable(
             instance,
             **physical_device,
-            surface_stuff,
+            surface,
+            surface_ext_loader,
             required_device_extensions,
         );
 
@@ -68,18 +49,20 @@ pub fn pick_physical_device(
 pub fn is_physical_device_suitable(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
-    surface_stuff: &SurfaceStuff,
+    surface: vk::SurfaceKHR,
+    surface_ext_loader: &ash::extensions::khr::Surface,
     required_device_extensions: &DeviceExtension,
 ) -> bool {
     let device_features = unsafe { instance.get_physical_device_features(physical_device) };
 
-    let indices = find_queue_family(instance, physical_device, surface_stuff);
+    let indices = find_queue_family(instance, physical_device, surface, surface_ext_loader);
 
     let is_queue_family_supported = indices.is_complete();
     let is_device_extension_supported =
         check_device_extension_support(instance, physical_device, required_device_extensions);
     let is_swapchain_supported = if is_device_extension_supported {
-        let swapchain_support = query_swapchain_support(physical_device, surface_stuff);
+        let swapchain_support =
+            query_swapchain_support(physical_device, surface, surface_ext_loader);
         !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
     } else {
         false
@@ -96,9 +79,10 @@ pub fn create_logical_device(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
     device_extensions: &DeviceExtension,
-    surface_stuff: &SurfaceStuff,
+    surface: vk::SurfaceKHR,
+    surface_ext_loader: &ash::extensions::khr::Surface,
 ) -> (ash::Device, QueueFamilyIndices) {
-    let indices = find_queue_family(instance, physical_device, surface_stuff);
+    let indices = find_queue_family(instance, physical_device, surface, surface_ext_loader);
 
     use std::collections::HashSet;
     let mut unique_queue_families = HashSet::new();
@@ -151,7 +135,8 @@ pub fn create_logical_device(
 pub fn find_queue_family(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
-    surface_stuff: &SurfaceStuff,
+    surface: vk::SurfaceKHR,
+    surface_ext_loader: &ash::extensions::khr::Surface,
 ) -> QueueFamilyIndices {
     let queue_families =
         unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
@@ -167,13 +152,11 @@ pub fn find_queue_family(
         }
 
         let is_present_support = unsafe {
-            surface_stuff
-                .surface_loader
-                .get_physical_device_surface_support(
-                    physical_device,
-                    index as u32,
-                    surface_stuff.surface,
-                )
+            surface_ext_loader.get_physical_device_surface_support(
+                physical_device,
+                index as u32,
+                surface,
+            )
         };
         if queue_family.queue_count > 0 && is_present_support {
             queue_family_indices.present_family = Some(index);
@@ -223,20 +206,18 @@ pub fn check_device_extension_support(
 
 pub fn query_swapchain_support(
     physical_device: vk::PhysicalDevice,
-    surface_stuff: &SurfaceStuff,
+    surface: vk::SurfaceKHR,
+    surface_ext_loader: &ash::extensions::khr::Surface,
 ) -> SwapChainSupportDetail {
     unsafe {
-        let capabilities = surface_stuff
-            .surface_loader
-            .get_physical_device_surface_capabilities(physical_device, surface_stuff.surface)
+        let capabilities = surface_ext_loader
+            .get_physical_device_surface_capabilities(physical_device, surface)
             .expect("Failed to query for surface capabilities.");
-        let formats = surface_stuff
-            .surface_loader
-            .get_physical_device_surface_formats(physical_device, surface_stuff.surface)
+        let formats = surface_ext_loader
+            .get_physical_device_surface_formats(physical_device, surface)
             .expect("Failed to query for surface formats.");
-        let present_modes = surface_stuff
-            .surface_loader
-            .get_physical_device_surface_present_modes(physical_device, surface_stuff.surface)
+        let present_modes = surface_ext_loader
+            .get_physical_device_surface_present_modes(physical_device, surface)
             .expect("Failed to query for surface present mode.");
 
         SwapChainSupportDetail {
@@ -252,10 +233,11 @@ pub fn create_swapchain(
     device: &ash::Device,
     physical_device: vk::PhysicalDevice,
     window: &winit::window::Window,
-    surface_stuff: &SurfaceStuff,
+    surface: vk::SurfaceKHR,
+    surface_ext_loader: &ash::extensions::khr::Surface,
     queue_family: &QueueFamilyIndices,
 ) -> SwapChainStuff {
-    let swapchain_support = query_swapchain_support(physical_device, surface_stuff);
+    let swapchain_support = query_swapchain_support(physical_device, surface, surface_ext_loader);
 
     let surface_format = choose_swapchain_format(&swapchain_support.formats);
     let present_mode = choose_swapchain_present_mode(&swapchain_support.present_modes);
@@ -286,7 +268,7 @@ pub fn create_swapchain(
         s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
         p_next: ptr::null(),
         flags: vk::SwapchainCreateFlagsKHR::empty(),
-        surface: surface_stuff.surface,
+        surface: surface,
         min_image_count: image_count,
         image_color_space: surface_format.color_space,
         image_format: surface_format.format,
