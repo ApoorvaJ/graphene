@@ -3,52 +3,11 @@
 pub mod v1;
 
 use ash::version::DeviceV1_0;
-use ash::version::InstanceV1_0;
 use ash::vk;
 
 use std::ptr;
 
 use crate::utility::structures::*;
-
-pub fn find_queue_family(
-    instance: &ash::Instance,
-    physical_device: vk::PhysicalDevice,
-    surface: vk::SurfaceKHR,
-    surface_ext_loader: &ash::extensions::khr::Surface,
-) -> QueueFamilyIndices {
-    let queue_families =
-        unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
-
-    let mut queue_family_indices = QueueFamilyIndices::new();
-
-    let mut index = 0;
-    for queue_family in queue_families.iter() {
-        if queue_family.queue_count > 0
-            && queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-        {
-            queue_family_indices.graphics_family = Some(index);
-        }
-
-        let is_present_support = unsafe {
-            surface_ext_loader.get_physical_device_surface_support(
-                physical_device,
-                index as u32,
-                surface,
-            )
-        };
-        if queue_family.queue_count > 0 && is_present_support {
-            queue_family_indices.present_family = Some(index);
-        }
-
-        if queue_family_indices.is_complete() {
-            break;
-        }
-
-        index += 1;
-    }
-
-    queue_family_indices
-}
 
 pub fn query_swapchain_support(
     physical_device: vk::PhysicalDevice,
@@ -81,7 +40,8 @@ pub fn create_swapchain(
     window: &winit::window::Window,
     surface: vk::SurfaceKHR,
     surface_ext_loader: &ash::extensions::khr::Surface,
-    queue_family: &QueueFamilyIndices,
+    graphics_queue_idx: u32,
+    present_queue_idx: u32,
 ) -> SwapChainStuff {
     let swapchain_support = query_swapchain_support(physical_device, surface, surface_ext_loader);
 
@@ -97,14 +57,11 @@ pub fn create_swapchain(
     };
 
     let (image_sharing_mode, queue_family_index_count, queue_family_indices) =
-        if queue_family.graphics_family != queue_family.present_family {
+        if graphics_queue_idx != present_queue_idx {
             (
                 vk::SharingMode::CONCURRENT,
                 2,
-                vec![
-                    queue_family.graphics_family.unwrap(),
-                    queue_family.present_family.unwrap(),
-                ],
+                vec![graphics_queue_idx, present_queue_idx],
             )
         } else {
             (vk::SharingMode::EXCLUSIVE, 0, vec![])

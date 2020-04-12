@@ -249,15 +249,12 @@ pub fn create_framebuffers(
     framebuffers
 }
 
-pub fn create_command_pool(
-    device: &ash::Device,
-    queue_families: &QueueFamilyIndices,
-) -> vk::CommandPool {
+pub fn create_command_pool(device: &ash::Device, graphics_queue_idx: u32) -> vk::CommandPool {
     let command_pool_create_info = vk::CommandPoolCreateInfo {
         s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::CommandPoolCreateFlags::empty(),
-        queue_family_index: queue_families.graphics_family.unwrap(),
+        queue_family_index: graphics_queue_idx,
     };
 
     unsafe {

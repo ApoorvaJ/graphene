@@ -185,31 +185,43 @@ impl VulkanApp {
                 utils_messenger
             }
         };
-        // 6. Pick physical device
-        let physical_device = {
+        // 6. Pick physical device and queue family indices
+        let (physical_device, graphics_queue_idx, present_queue_idx) = {
             let physical_devices = unsafe {
                 &instance
                     .enumerate_physical_devices()
                     .expect("Failed to enumerate Physical Devices!")
             };
             // Pick the first compatible physical device
-            let result = physical_devices.iter().find(|&&physical_device| {
-                let device_features =
-                    unsafe { instance.get_physical_device_features(physical_device) };
+            struct Compat {
+                device: vk::PhysicalDevice,
+                graphics_queue_idx: u32,
+                present_queue_idx: u32,
+            }
+            let mut opt_compat: Option<Compat> = None;
+            for &device in physical_devices.iter() {
+                let device_features = unsafe { instance.get_physical_device_features(device) };
 
-                let indices = share::find_queue_family(
-                    &instance,
-                    physical_device,
-                    surface,
-                    &surface_ext_loader,
-                );
-                let is_queue_family_supported = indices.is_complete();
+                let queue_families =
+                    unsafe { instance.get_physical_device_queue_family_properties(device) };
+
+                let opt_graphics_queue_idx = queue_families.iter().position(|&fam| {
+                    fam.queue_count > 0 && fam.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                });
+                let opt_present_queue_idx =
+                    queue_families.iter().enumerate().position(|(i, &fam)| {
+                        let is_present_supported = unsafe {
+                            surface_ext_loader
+                                .get_physical_device_surface_support(device, i as u32, surface)
+                        };
+                        fam.queue_count > 0 && is_present_supported
+                    });
 
                 let is_device_extension_supported = {
-                    // Query availalbe extensions
+                    // Query available extensions
                     let props = unsafe {
                         instance
-                            .enumerate_device_extension_properties(physical_device)
+                            .enumerate_device_extension_properties(device)
                             .expect("Failed to get device extension properties.")
                     };
                     let available_exts: Vec<String> = props
@@ -225,11 +237,8 @@ impl VulkanApp {
                 };
 
                 let is_swapchain_supported = if is_device_extension_supported {
-                    let swapchain_support = share::query_swapchain_support(
-                        physical_device,
-                        surface,
-                        &surface_ext_loader,
-                    );
+                    let swapchain_support =
+                        share::query_swapchain_support(device, surface, &surface_ext_loader);
                     !swapchain_support.formats.is_empty()
                         && !swapchain_support.present_modes.is_empty()
                 } else {
@@ -237,26 +246,36 @@ impl VulkanApp {
                 };
                 let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
-                return is_queue_family_supported
+                if opt_graphics_queue_idx.is_some()
+                    && opt_present_queue_idx.is_some()
                     && is_device_extension_supported
                     && is_swapchain_supported
-                    && is_support_sampler_anisotropy;
-            });
+                    && is_support_sampler_anisotropy
+                {
+                    opt_compat = Some(Compat {
+                        device,
+                        graphics_queue_idx: opt_graphics_queue_idx.unwrap() as u32,
+                        present_queue_idx: opt_present_queue_idx.unwrap() as u32,
+                    });
+                    break;
+                }
+            }
 
-            match result {
-                Some(p_physical_device) => *p_physical_device,
+            match opt_compat {
+                Some(compat) => (
+                    compat.device,
+                    compat.graphics_queue_idx,
+                    compat.present_queue_idx,
+                ),
                 None => panic!("Failed to find a suitable GPU!"),
             }
         };
         // 7. Create logical device
-        let (device, family_indices) = {
-            let indices =
-                share::find_queue_family(&instance, physical_device, surface, &surface_ext_loader);
-
+        let device = {
             use std::collections::HashSet;
             let mut unique_queue_families = HashSet::new();
-            unique_queue_families.insert(indices.graphics_family.unwrap());
-            unique_queue_families.insert(indices.present_family.unwrap());
+            unique_queue_families.insert(graphics_queue_idx);
+            unique_queue_families.insert(present_queue_idx);
 
             let queue_priorities = [1.0_f32];
             let mut queue_create_infos = vec![];
@@ -298,12 +317,10 @@ impl VulkanApp {
                     .expect("Failed to create logical Device!")
             };
 
-            (device, indices)
+            device
         };
-        let graphics_queue =
-            unsafe { device.get_device_queue(family_indices.graphics_family.unwrap(), 0) };
-        let present_queue =
-            unsafe { device.get_device_queue(family_indices.present_family.unwrap(), 0) };
+        let graphics_queue = unsafe { device.get_device_queue(graphics_queue_idx, 0) };
+        let present_queue = unsafe { device.get_device_queue(present_queue_idx, 0) };
         let swapchain_stuff = share::create_swapchain(
             &instance,
             &device,
@@ -311,7 +328,8 @@ impl VulkanApp {
             &window,
             surface,
             &surface_ext_loader,
-            &family_indices,
+            graphics_queue_idx,
+            present_queue_idx,
         );
         let swapchain_imageviews = share::v1::create_image_views(
             &device,
@@ -330,7 +348,7 @@ impl VulkanApp {
             &swapchain_imageviews,
             swapchain_stuff.swapchain_extent,
         );
-        let command_pool = share::v1::create_command_pool(&device, &family_indices);
+        let command_pool = share::v1::create_command_pool(&device, graphics_queue_idx);
         let command_buffers = share::v1::create_command_buffers(
             &device,
             command_pool,
