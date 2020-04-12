@@ -73,6 +73,10 @@ impl VulkanApp {
         const WINDOW_HEIGHT: u32 = 600;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
+        const DEVICE_EXTENSIONS: structures::DeviceExtension = structures::DeviceExtension {
+            names: ["VK_KHR_swapchain"],
+        };
+
 
         // 1. Init window
         let window = {
@@ -199,37 +203,24 @@ impl VulkanApp {
                 let device_features = unsafe { instance.get_physical_device_features(physical_device) };
 
                 let indices = share::find_queue_family(&instance, physical_device, surface, &surface_ext_loader);
-
                 let is_queue_family_supported = indices.is_complete();
+
                 let is_device_extension_supported = {
 
-                    let available_extensions = unsafe {
+                    // Query availalbe extensions
+                    let props = unsafe {
                         instance
                             .enumerate_device_extension_properties(physical_device)
                             .expect("Failed to get device extension properties.")
                     };
+                    let available_exts: Vec<String> = props.iter()
+                        .map(|&ext| tools::vk_to_string(&ext.extension_name))
+                        .collect();
 
-                    let mut available_extension_names = vec![];
-
-                    for extension in available_extensions.iter() {
-                        let extension_name = tools::vk_to_string(&extension.extension_name);
-
-                        available_extension_names.push(extension_name);
-                    }
-
-                    // TODO: Simplify
-                    use std::collections::HashSet;
-                    let mut required_extensions = HashSet::new();
-                    for extension in DEVICE_EXTENSIONS.names.iter() {
-                        required_extensions.insert(extension.to_string());
-                    }
-
-                    for extension_name in available_extension_names.iter() {
-                        required_extensions.remove(extension_name);
-                    }
-
-                    required_extensions.is_empty()
-                    //
+                    DEVICE_EXTENSIONS.names.iter()
+                        .all(|required_ext| {
+                            available_exts.iter().any(|available_ext| required_ext == available_ext)
+                        })
                 };
 
                 let is_swapchain_supported = if is_device_extension_supported {
