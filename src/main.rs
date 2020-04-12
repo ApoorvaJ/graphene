@@ -1,10 +1,5 @@
 mod utility;
-use crate::{
-    utility::*,
-    utility::constants::*,
-    utility::debug::*,
-    utility::share,
-};
+use crate::{utility::debug::*, utility::share, utility::*};
 
 use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
@@ -67,7 +62,6 @@ struct VulkanApp {
 
 impl VulkanApp {
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
-
         const WINDOW_TITLE: &str = "Hello Triangle";
         const WINDOW_WIDTH: u32 = 800;
         const WINDOW_HEIGHT: u32 = 600;
@@ -76,7 +70,6 @@ impl VulkanApp {
         const DEVICE_EXTENSIONS: structures::DeviceExtension = structures::DeviceExtension {
             names: ["VK_KHR_swapchain"],
         };
-
 
         // 1. Init window
         let window = {
@@ -90,7 +83,6 @@ impl VulkanApp {
         let entry = ash::Entry::new().unwrap();
         // 3. Create Vulkan instance
         let instance = {
-
             // Ensure that all desired validation layers are available
             if validation_layers.len() > 0 {
                 // Enumerate available validation layers
@@ -99,11 +91,16 @@ impl VulkanApp {
                     .expect("Failed to enumerate instance layers properties.");
                 // Iterate over all desired layers
                 for layer in validation_layers.iter() {
-                    let is_layer_found = layer_props.iter().any(|&prop| tools::vk_to_string(&prop.layer_name) == *layer);
+                    let is_layer_found = layer_props
+                        .iter()
+                        .any(|&prop| tools::vk_to_string(&prop.layer_name) == *layer);
                     if is_layer_found == false {
-                        panic!("Validation layer '{}' requested, but not found. \
+                        panic!(
+                            "Validation layer '{}' requested, but not found. \
                                (1) Install the Vulkan SDK and set up validation layers, \
-                               or (2) remove any validation layers in the Rust code.", layer);
+                               or (2) remove any validation layers in the Rust code.",
+                            layer
+                        );
                     }
                 }
             }
@@ -168,18 +165,16 @@ impl VulkanApp {
         };
         // 4. Create surface
         let surface = unsafe {
-            platforms::create_surface(&entry, &instance, &window).expect("Failed to create surface.")
+            platforms::create_surface(&entry, &instance, &window)
+                .expect("Failed to create surface.")
         };
         let surface_ext_loader = ash::extensions::khr::Surface::new(&entry, &instance);
         // 5. Debug messenger callback
         let debug_utils_ext_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-        let debug_messenger =
-        {
+        let debug_messenger = {
             if ENABLE_DEBUG_MESSENGER_CALLBACK == false {
                 ash::vk::DebugUtilsMessengerEXT::null()
-
             } else {
-
                 let messenger_ci = populate_debug_messenger_create_info();
                 let utils_messenger = unsafe {
                     debug_utils_ext_loader
@@ -192,7 +187,6 @@ impl VulkanApp {
         };
         // 6. Pick physical device
         let physical_device = {
-
             let physical_devices = unsafe {
                 &instance
                     .enumerate_physical_devices()
@@ -200,32 +194,44 @@ impl VulkanApp {
             };
             // Pick the first compatible physical device
             let result = physical_devices.iter().find(|&&physical_device| {
-                let device_features = unsafe { instance.get_physical_device_features(physical_device) };
+                let device_features =
+                    unsafe { instance.get_physical_device_features(physical_device) };
 
-                let indices = share::find_queue_family(&instance, physical_device, surface, &surface_ext_loader);
+                let indices = share::find_queue_family(
+                    &instance,
+                    physical_device,
+                    surface,
+                    &surface_ext_loader,
+                );
                 let is_queue_family_supported = indices.is_complete();
 
                 let is_device_extension_supported = {
-
                     // Query availalbe extensions
                     let props = unsafe {
                         instance
                             .enumerate_device_extension_properties(physical_device)
                             .expect("Failed to get device extension properties.")
                     };
-                    let available_exts: Vec<String> = props.iter()
+                    let available_exts: Vec<String> = props
+                        .iter()
                         .map(|&ext| tools::vk_to_string(&ext.extension_name))
                         .collect();
 
-                    DEVICE_EXTENSIONS.names.iter()
-                        .all(|required_ext| {
-                            available_exts.iter().any(|available_ext| required_ext == available_ext)
-                        })
+                    DEVICE_EXTENSIONS.names.iter().all(|required_ext| {
+                        available_exts
+                            .iter()
+                            .any(|available_ext| required_ext == available_ext)
+                    })
                 };
 
                 let is_swapchain_supported = if is_device_extension_supported {
-                    let swapchain_support = share::query_swapchain_support(physical_device, surface, &surface_ext_loader);
-                    !swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
+                    let swapchain_support = share::query_swapchain_support(
+                        physical_device,
+                        surface,
+                        &surface_ext_loader,
+                    );
+                    !swapchain_support.formats.is_empty()
+                        && !swapchain_support.present_modes.is_empty()
                 } else {
                     false
                 };
@@ -242,14 +248,58 @@ impl VulkanApp {
                 None => panic!("Failed to find a suitable GPU!"),
             }
         };
+        // 7. Create logical device
+        let (device, family_indices) = {
+            let indices =
+                share::find_queue_family(&instance, physical_device, surface, &surface_ext_loader);
 
-        let (device, family_indices) = share::create_logical_device(
-            &instance,
-            physical_device,
-            &DEVICE_EXTENSIONS,
-            surface,
-            &surface_ext_loader
-        );
+            use std::collections::HashSet;
+            let mut unique_queue_families = HashSet::new();
+            unique_queue_families.insert(indices.graphics_family.unwrap());
+            unique_queue_families.insert(indices.present_family.unwrap());
+
+            let queue_priorities = [1.0_f32];
+            let mut queue_create_infos = vec![];
+            for &queue_family in unique_queue_families.iter() {
+                let queue_create_info = vk::DeviceQueueCreateInfo {
+                    s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
+                    p_next: ptr::null(),
+                    flags: vk::DeviceQueueCreateFlags::empty(),
+                    queue_family_index: queue_family,
+                    p_queue_priorities: queue_priorities.as_ptr(),
+                    queue_count: queue_priorities.len() as u32,
+                };
+                queue_create_infos.push(queue_create_info);
+            }
+
+            let physical_device_features = vk::PhysicalDeviceFeatures {
+                sampler_anisotropy: vk::TRUE, // enable anisotropy device feature from Chapter-24.
+                ..Default::default()
+            };
+
+            let enable_extension_names = DEVICE_EXTENSIONS.get_extensions_raw_names();
+
+            let device_create_info = vk::DeviceCreateInfo {
+                s_type: vk::StructureType::DEVICE_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::DeviceCreateFlags::empty(),
+                queue_create_info_count: queue_create_infos.len() as u32,
+                p_queue_create_infos: queue_create_infos.as_ptr(),
+                enabled_layer_count: 0,
+                pp_enabled_layer_names: ptr::null(),
+                enabled_extension_count: enable_extension_names.len() as u32,
+                pp_enabled_extension_names: enable_extension_names.as_ptr(),
+                p_enabled_features: &physical_device_features,
+            };
+
+            let device: ash::Device = unsafe {
+                instance
+                    .create_device(physical_device, &device_create_info, None)
+                    .expect("Failed to create logical Device!")
+            };
+
+            (device, indices)
+        };
         let graphics_queue =
             unsafe { device.get_device_queue(family_indices.graphics_family.unwrap(), 0) };
         let present_queue =

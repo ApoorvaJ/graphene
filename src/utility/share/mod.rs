@@ -10,63 +10,6 @@ use std::ptr;
 
 use crate::utility::structures::*;
 
-pub fn create_logical_device(
-    instance: &ash::Instance,
-    physical_device: vk::PhysicalDevice,
-    device_extensions: &DeviceExtension,
-    surface: vk::SurfaceKHR,
-    surface_ext_loader: &ash::extensions::khr::Surface,
-) -> (ash::Device, QueueFamilyIndices) {
-    let indices = find_queue_family(instance, physical_device, surface, surface_ext_loader);
-
-    use std::collections::HashSet;
-    let mut unique_queue_families = HashSet::new();
-    unique_queue_families.insert(indices.graphics_family.unwrap());
-    unique_queue_families.insert(indices.present_family.unwrap());
-
-    let queue_priorities = [1.0_f32];
-    let mut queue_create_infos = vec![];
-    for &queue_family in unique_queue_families.iter() {
-        let queue_create_info = vk::DeviceQueueCreateInfo {
-            s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::DeviceQueueCreateFlags::empty(),
-            queue_family_index: queue_family,
-            p_queue_priorities: queue_priorities.as_ptr(),
-            queue_count: queue_priorities.len() as u32,
-        };
-        queue_create_infos.push(queue_create_info);
-    }
-
-    let physical_device_features = vk::PhysicalDeviceFeatures {
-        sampler_anisotropy: vk::TRUE, // enable anisotropy device feature from Chapter-24.
-        ..Default::default()
-    };
-
-    let enable_extension_names = device_extensions.get_extensions_raw_names();
-
-    let device_create_info = vk::DeviceCreateInfo {
-        s_type: vk::StructureType::DEVICE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::DeviceCreateFlags::empty(),
-        queue_create_info_count: queue_create_infos.len() as u32,
-        p_queue_create_infos: queue_create_infos.as_ptr(),
-        enabled_layer_count: 0,
-        pp_enabled_layer_names: ptr::null(),
-        enabled_extension_count: enable_extension_names.len() as u32,
-        pp_enabled_extension_names: enable_extension_names.as_ptr(),
-        p_enabled_features: &physical_device_features,
-    };
-
-    let device: ash::Device = unsafe {
-        instance
-            .create_device(physical_device, &device_create_info, None)
-            .expect("Failed to create logical Device!")
-    };
-
-    (device, indices)
-}
-
 pub fn find_queue_family(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
@@ -87,12 +30,11 @@ pub fn find_queue_family(
         }
 
         let is_present_support = unsafe {
-            surface_ext_loader
-                .get_physical_device_surface_support(
-                    physical_device,
-                    index as u32,
-                    surface,
-                )
+            surface_ext_loader.get_physical_device_surface_support(
+                physical_device,
+                index as u32,
+                surface,
+            )
         };
         if queue_family.queue_count > 0 && is_present_support {
             queue_family_indices.present_family = Some(index);
