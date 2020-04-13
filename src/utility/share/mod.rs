@@ -1,11 +1,6 @@
 //! Split reduplicate functions in this share module
 
-pub mod v1;
-
-use ash::version::DeviceV1_0;
 use ash::vk;
-
-use std::ptr;
 
 pub fn choose_swapchain_format(
     available_formats: &Vec<vk::SurfaceFormatKHR>,
@@ -54,21 +49,5 @@ pub fn choose_swapchain_extent(
                 .max(capabilities.min_image_extent.height)
                 .min(capabilities.max_image_extent.height),
         }
-    }
-}
-
-pub fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
-    let shader_module_create_info = vk::ShaderModuleCreateInfo {
-        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::ShaderModuleCreateFlags::empty(),
-        code_size: code.len(),
-        p_code: code.as_ptr() as *const u32,
-    };
-
-    unsafe {
-        device
-            .create_shader_module(&shader_module_create_info, None)
-            .expect("Failed to create Shader Module!")
     }
 }
