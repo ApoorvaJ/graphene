@@ -393,7 +393,24 @@ impl VulkanApp {
 
             (device, graphics_queue, present_queue)
         };
-        // 8. Create swapchain
+
+        // 8. Create command pool
+        let command_pool = {
+            let command_pool_create_info = vk::CommandPoolCreateInfo {
+                s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::CommandPoolCreateFlags::empty(),
+                queue_family_index: graphics_queue_idx,
+            };
+
+            unsafe {
+                device
+                    .create_command_pool(&command_pool_create_info, None)
+                    .expect("Failed to create Command Pool!")
+            }
+        };
+
+        // 9. Create swapchain
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &device);
         let swapchain = {
             let surface_format: vk::SurfaceFormatKHR = {
@@ -488,7 +505,7 @@ impl VulkanApp {
                 images,
             }
         };
-        // 9. Create image views
+        // 10. Create image views
         let swapchain_imageviews = {
             let imageviews: Vec<vk::ImageView> = swapchain
                 .images
@@ -526,7 +543,7 @@ impl VulkanApp {
 
             imageviews
         };
-        // 10. Create render pass
+        // 11. Create render pass
         let render_pass = {
             let color_attachment = vk::AttachmentDescription {
                 format: swapchain.format,
@@ -588,7 +605,7 @@ impl VulkanApp {
                     .expect("Failed to create render pass!")
             }
         };
-        // 11. Create graphics pipeline
+        // 12. Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
                 &device,
@@ -795,7 +812,7 @@ impl VulkanApp {
             (graphics_pipelines[0], pipeline_layout)
         };
 
-        // 12. Create framebuffers
+        // 13. Create framebuffers
         let swapchain_framebuffers: Vec<vk::Framebuffer> = {
             swapchain_imageviews
                 .iter()
@@ -821,22 +838,6 @@ impl VulkanApp {
                     }
                 })
                 .collect()
-        };
-
-        // 13. Create command pool
-        let command_pool = {
-            let command_pool_create_info = vk::CommandPoolCreateInfo {
-                s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::CommandPoolCreateFlags::empty(),
-                queue_family_index: graphics_queue_idx,
-            };
-
-            unsafe {
-                device
-                    .create_command_pool(&command_pool_create_info, None)
-                    .expect("Failed to create Command Pool!")
-            }
         };
 
         // 14. Create command buffers
@@ -1109,7 +1110,6 @@ impl Drop for VulkanApp {
     }
 }
 
-// Fix content -------------------------------------------------------------------------------
 impl VulkanApp {
     pub fn main_loop(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, _, control_flow| match event {
@@ -1156,4 +1156,3 @@ fn main() {
     let vulkan_app = VulkanApp::new(&event_loop);
     vulkan_app.main_loop(event_loop);
 }
-// -------------------------------------------------------------------------------------------
