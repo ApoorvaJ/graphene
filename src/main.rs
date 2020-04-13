@@ -10,6 +10,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use std::ffi::CString;
+use std::os::raw::c_char;
 use std::os::raw::c_void;
 use std::ptr;
 
@@ -67,9 +68,7 @@ impl VulkanApp {
         const WINDOW_HEIGHT: u32 = 600;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
-        const DEVICE_EXTENSIONS: structures::DeviceExtension = structures::DeviceExtension {
-            names: ["VK_KHR_swapchain"],
-        };
+        let device_extensions = vec![String::from("VK_KHR_swapchain")];
 
         // 1. Init window
         let window = {
@@ -122,11 +121,11 @@ impl VulkanApp {
             // VK_EXT debug report has been requested here.
             let extension_names = platforms::required_extension_names();
 
-            let requred_validation_layer_raw_names: Vec<CString> = validation_layers
+            let required_validation_layer_raw_names: Vec<CString> = validation_layers
                 .iter()
                 .map(|layer_name| CString::new(layer_name.to_string()).unwrap())
                 .collect();
-            let layer_names: Vec<*const i8> = requred_validation_layer_raw_names
+            let layer_names: Vec<*const i8> = required_validation_layer_raw_names
                 .iter()
                 .map(|layer_name| layer_name.as_ptr())
                 .collect();
@@ -229,7 +228,7 @@ impl VulkanApp {
                         .map(|&ext| tools::vk_to_string(&ext.extension_name))
                         .collect();
 
-                    DEVICE_EXTENSIONS.names.iter().all(|required_ext| {
+                    device_extensions.iter().all(|required_ext| {
                         available_exts
                             .iter()
                             .any(|available_ext| required_ext == available_ext)
@@ -296,7 +295,12 @@ impl VulkanApp {
                 ..Default::default()
             };
 
-            let enable_extension_names = DEVICE_EXTENSIONS.get_extensions_raw_names();
+            let raw_ext_names: Vec<CString> = device_extensions
+                .iter()
+                .map(|ext| CString::new(ext.to_string()).unwrap())
+                .collect();
+            let ext_names: Vec<*const c_char> =
+                raw_ext_names.iter().map(|ext| ext.as_ptr()).collect();
 
             let device_create_info = vk::DeviceCreateInfo {
                 s_type: vk::StructureType::DEVICE_CREATE_INFO,
@@ -306,8 +310,8 @@ impl VulkanApp {
                 p_queue_create_infos: queue_create_infos.as_ptr(),
                 enabled_layer_count: 0,
                 pp_enabled_layer_names: ptr::null(),
-                enabled_extension_count: enable_extension_names.len() as u32,
-                pp_enabled_extension_names: enable_extension_names.as_ptr(),
+                enabled_extension_count: device_extensions.len() as u32,
+                pp_enabled_extension_names: ext_names.as_ptr(),
                 p_enabled_features: &physical_device_features,
             };
 

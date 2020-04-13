@@ -1,10 +1,6 @@
 use ash::vk;
 use cgmath::Matrix4;
 
-pub struct DeviceExtension {
-    pub names: [&'static str; 1],
-}
-
 pub struct SwapChainStuff {
     pub swapchain_loader: ash::extensions::khr::Swapchain,
     pub swapchain: vk::SwapchainKHR,
