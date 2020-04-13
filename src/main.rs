@@ -23,6 +23,14 @@ struct SyncObjects {
     inflight_fences: Vec<vk::Fence>,
 }
 
+struct Swapchain {
+    pub handle: vk::SwapchainKHR,
+    pub ext_loader: ash::extensions::khr::Swapchain,
+    pub format: vk::Format,
+    pub extent: vk::Extent2D,
+    pub images: Vec<vk::Image>,
+}
+
 struct VulkanApp {
     window: winit::window::Window,
     // Vulkan
@@ -40,11 +48,7 @@ struct VulkanApp {
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
 
-    swapchain_loader: ash::extensions::khr::Swapchain,
-    swapchain: vk::SwapchainKHR,
-    _swapchain_images: Vec<vk::Image>,
-    _swapchain_format: vk::Format,
-    _swapchain_extent: vk::Extent2D,
+    swapchain: Swapchain,
     swapchain_imageviews: Vec<vk::ImageView>,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
 
@@ -66,9 +70,15 @@ impl VulkanApp {
         const WINDOW_TITLE: &str = "Hello Triangle";
         const WINDOW_WIDTH: u32 = 800;
         const WINDOW_HEIGHT: u32 = 600;
-        let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
+        let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
+
+        struct SwapchainSupport {
+            capabilities: vk::SurfaceCapabilitiesKHR,
+            formats: Vec<vk::SurfaceFormatKHR>,
+            present_modes: Vec<vk::PresentModeKHR>,
+        }
 
         // 1. Init window
         let window = {
@@ -185,7 +195,7 @@ impl VulkanApp {
             }
         };
         // 6. Pick physical device and queue family indices
-        let (physical_device, graphics_queue_idx, present_queue_idx) = {
+        let (physical_device, swapchain_support, graphics_queue_idx, present_queue_idx) = {
             let physical_devices = unsafe {
                 &instance
                     .enumerate_physical_devices()
@@ -194,6 +204,7 @@ impl VulkanApp {
             // Pick the first compatible physical device
             struct Compat {
                 physical_device: vk::PhysicalDevice,
+                swapchain_support: SwapchainSupport,
                 graphics_queue_idx: u32,
                 present_queue_idx: u32,
             }
@@ -240,45 +251,64 @@ impl VulkanApp {
                     })
                 };
 
-                let is_swapchain_supported = if is_device_extension_supported {
-                    let swapchain_support = share::query_swapchain_support(
-                        physical_device,
-                        surface,
-                        &surface_ext_loader,
-                    );
-                    !swapchain_support.formats.is_empty()
-                        && !swapchain_support.present_modes.is_empty()
+                let opt_swapchain_support = if is_device_extension_supported {
+                    unsafe {
+                        let capabilities = surface_ext_loader
+                            .get_physical_device_surface_capabilities(physical_device, surface)
+                            .expect("Failed to query for surface capabilities.");
+                        let formats = surface_ext_loader
+                            .get_physical_device_surface_formats(physical_device, surface)
+                            .expect("Failed to query for surface formats.");
+                        let present_modes = surface_ext_loader
+                            .get_physical_device_surface_present_modes(physical_device, surface)
+                            .expect("Failed to query for surface present mode.");
+
+                        Some(SwapchainSupport {
+                            capabilities,
+                            formats,
+                            present_modes,
+                        })
+                    }
                 } else {
-                    false
+                    None
                 };
                 let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
                 if opt_graphics_queue_idx.is_some()
                     && opt_present_queue_idx.is_some()
+                    && opt_swapchain_support.is_some()
                     && is_device_extension_supported
-                    && is_swapchain_supported
                     && is_support_sampler_anisotropy
                 {
-                    opt_compat = Some(Compat {
-                        physical_device,
-                        graphics_queue_idx: opt_graphics_queue_idx.unwrap() as u32,
-                        present_queue_idx: opt_present_queue_idx.unwrap() as u32,
-                    });
-                    break;
+                    if let Some(swapchain_support) = opt_swapchain_support {
+                        if !swapchain_support.formats.is_empty()
+                            && !swapchain_support.present_modes.is_empty()
+                        {
+                            // Compatible physical device found
+                            opt_compat = Some(Compat {
+                                physical_device,
+                                swapchain_support,
+                                graphics_queue_idx: opt_graphics_queue_idx.unwrap() as u32,
+                                present_queue_idx: opt_present_queue_idx.unwrap() as u32,
+                            });
+                            break;
+                        }
+                    }
                 }
             }
 
             match opt_compat {
                 Some(compat) => (
                     compat.physical_device,
+                    compat.swapchain_support,
                     compat.graphics_queue_idx,
                     compat.present_queue_idx,
                 ),
                 None => panic!("Failed to find a suitable GPU!"),
             }
         };
-        // 7. Create logical device
-        let device = {
+        // 7. Create logical device and queues
+        let (device, graphics_queue, present_queue) = {
             use std::collections::HashSet;
             let mut unique_queue_families = HashSet::new();
             unique_queue_families.insert(graphics_queue_idx);
@@ -329,36 +359,88 @@ impl VulkanApp {
                     .expect("Failed to create logical Device!")
             };
 
-            device
+            let graphics_queue = unsafe { device.get_device_queue(graphics_queue_idx, 0) };
+            let present_queue = unsafe { device.get_device_queue(present_queue_idx, 0) };
+
+            (device, graphics_queue, present_queue)
         };
-        let graphics_queue = unsafe { device.get_device_queue(graphics_queue_idx, 0) };
-        let present_queue = unsafe { device.get_device_queue(present_queue_idx, 0) };
-        let swapchain_stuff = share::create_swapchain(
-            &instance,
-            &device,
-            physical_device,
-            &window,
-            surface,
-            &surface_ext_loader,
-            graphics_queue_idx,
-            present_queue_idx,
-        );
-        let swapchain_imageviews = share::v1::create_image_views(
-            &device,
-            swapchain_stuff.swapchain_format,
-            &swapchain_stuff.swapchain_images,
-        );
-        let render_pass = VulkanApp::create_render_pass(&device, swapchain_stuff.swapchain_format);
-        let (graphics_pipeline, pipeline_layout) = share::v1::create_graphics_pipeline(
-            &device,
-            render_pass,
-            swapchain_stuff.swapchain_extent,
-        );
+        // 8. Create swapchain
+        let swapchain = {
+            let surface_format = share::choose_swapchain_format(&swapchain_support.formats);
+            let present_mode =
+                share::choose_swapchain_present_mode(&swapchain_support.present_modes);
+            let extent = share::choose_swapchain_extent(&swapchain_support.capabilities, &window);
+
+            let image_count = swapchain_support.capabilities.min_image_count + 1;
+            let image_count = if swapchain_support.capabilities.max_image_count > 0 {
+                image_count.min(swapchain_support.capabilities.max_image_count)
+            } else {
+                image_count
+            };
+
+            let (image_sharing_mode, queue_family_index_count, queue_family_indices) =
+                if graphics_queue_idx != present_queue_idx {
+                    (
+                        vk::SharingMode::CONCURRENT,
+                        2,
+                        vec![graphics_queue_idx, present_queue_idx],
+                    )
+                } else {
+                    (vk::SharingMode::EXCLUSIVE, 0, vec![])
+                };
+
+            let swapchain_create_info = vk::SwapchainCreateInfoKHR {
+                s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
+                p_next: ptr::null(),
+                flags: vk::SwapchainCreateFlagsKHR::empty(),
+                surface: surface,
+                min_image_count: image_count,
+                image_color_space: surface_format.color_space,
+                image_format: surface_format.format,
+                image_extent: extent,
+                image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                image_sharing_mode,
+                p_queue_family_indices: queue_family_indices.as_ptr(),
+                queue_family_index_count,
+                pre_transform: swapchain_support.capabilities.current_transform,
+                composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
+                present_mode,
+                clipped: vk::TRUE,
+                old_swapchain: vk::SwapchainKHR::null(),
+                image_array_layers: 1,
+            };
+
+            let ext_loader = ash::extensions::khr::Swapchain::new(&instance, &device);
+            let handle = unsafe {
+                ext_loader
+                    .create_swapchain(&swapchain_create_info, None)
+                    .expect("Failed to create Swapchain!")
+            };
+
+            let images = unsafe {
+                ext_loader
+                    .get_swapchain_images(handle)
+                    .expect("Failed to get Swapchain Images.")
+            };
+
+            Swapchain {
+                handle,
+                ext_loader,
+                format: surface_format.format,
+                extent,
+                images,
+            }
+        };
+        let swapchain_imageviews =
+            share::v1::create_image_views(&device, swapchain.format, &swapchain.images);
+        let render_pass = VulkanApp::create_render_pass(&device, swapchain.format);
+        let (graphics_pipeline, pipeline_layout) =
+            share::v1::create_graphics_pipeline(&device, render_pass, swapchain.extent);
         let swapchain_framebuffers = share::v1::create_framebuffers(
             &device,
             render_pass,
             &swapchain_imageviews,
-            swapchain_stuff.swapchain_extent,
+            swapchain.extent,
         );
         let command_pool = share::v1::create_command_pool(&device, graphics_queue_idx);
         let command_buffers = share::v1::create_command_buffers(
@@ -367,7 +449,7 @@ impl VulkanApp {
             graphics_pipeline,
             &swapchain_framebuffers,
             render_pass,
-            swapchain_stuff.swapchain_extent,
+            swapchain.extent,
         );
         let sync_ojbects = VulkanApp::create_sync_objects(&device);
 
@@ -389,11 +471,7 @@ impl VulkanApp {
             graphics_queue,
             present_queue,
 
-            swapchain_loader: swapchain_stuff.swapchain_loader,
-            swapchain: swapchain_stuff.swapchain,
-            _swapchain_format: swapchain_stuff.swapchain_format,
-            _swapchain_images: swapchain_stuff.swapchain_images,
-            _swapchain_extent: swapchain_stuff.swapchain_extent,
+            swapchain,
             swapchain_imageviews,
             swapchain_framebuffers,
 
@@ -419,9 +497,10 @@ impl VulkanApp {
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
                 .expect("Failed to wait for Fence!");
 
-            self.swapchain_loader
+            self.swapchain
+                .ext_loader
                 .acquire_next_image(
-                    self.swapchain,
+                    self.swapchain.handle,
                     std::u64::MAX,
                     self.image_available_semaphores[self.current_frame],
                     vk::Fence::null(),
@@ -459,7 +538,7 @@ impl VulkanApp {
                 .expect("Failed to execute queue submit.");
         }
 
-        let swapchains = [self.swapchain];
+        let swapchains = [self.swapchain.handle];
 
         let present_info = vk::PresentInfoKHR {
             s_type: vk::StructureType::PRESENT_INFO_KHR,
@@ -473,7 +552,8 @@ impl VulkanApp {
         };
 
         unsafe {
-            self.swapchain_loader
+            self.swapchain
+                .ext_loader
                 .queue_present(self.present_queue, &present_info)
                 .expect("Failed to execute queue present.");
         }
@@ -614,8 +694,9 @@ impl Drop for VulkanApp {
                 self.device.destroy_image_view(imageview, None);
             }
 
-            self.swapchain_loader
-                .destroy_swapchain(self.swapchain, None);
+            self.swapchain
+                .ext_loader
+                .destroy_swapchain(self.swapchain.handle, None);
             self.device.destroy_device(None);
             self.surface_ext_loader.destroy_surface(self.surface, None);
 
