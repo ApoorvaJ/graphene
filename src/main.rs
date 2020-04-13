@@ -921,7 +921,49 @@ impl VulkanApp {
         };
 
         // 15. Create sync objects
-        let sync_ojbects = VulkanApp::create_sync_objects(&device);
+        let sync_ojbects = {
+            let mut sync_objects = SyncObjects {
+                image_available_semaphores: vec![],
+                render_finished_semaphores: vec![],
+                inflight_fences: vec![],
+            };
+
+            let semaphore_create_info = vk::SemaphoreCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::SemaphoreCreateFlags::empty(),
+            };
+
+            let fence_create_info = vk::FenceCreateInfo {
+                s_type: vk::StructureType::FENCE_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::FenceCreateFlags::SIGNALED,
+            };
+
+            for _ in 0..MAX_FRAMES_IN_FLIGHT {
+                unsafe {
+                    let image_available_semaphore = device
+                        .create_semaphore(&semaphore_create_info, None)
+                        .expect("Failed to create Semaphore Object!");
+                    let render_finished_semaphore = device
+                        .create_semaphore(&semaphore_create_info, None)
+                        .expect("Failed to create Semaphore Object!");
+                    let inflight_fence = device
+                        .create_fence(&fence_create_info, None)
+                        .expect("Failed to create Fence Object!");
+
+                    sync_objects
+                        .image_available_semaphores
+                        .push(image_available_semaphore);
+                    sync_objects
+                        .render_finished_semaphores
+                        .push(render_finished_semaphore);
+                    sync_objects.inflight_fences.push(inflight_fence);
+                }
+            }
+
+            sync_objects
+        };
 
         // cleanup(); the 'drop' function will take care of it.
         VulkanApp {
@@ -1028,50 +1070,6 @@ impl VulkanApp {
         }
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-    }
-
-    fn create_sync_objects(device: &ash::Device) -> SyncObjects {
-        let mut sync_objects = SyncObjects {
-            image_available_semaphores: vec![],
-            render_finished_semaphores: vec![],
-            inflight_fences: vec![],
-        };
-
-        let semaphore_create_info = vk::SemaphoreCreateInfo {
-            s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::SemaphoreCreateFlags::empty(),
-        };
-
-        let fence_create_info = vk::FenceCreateInfo {
-            s_type: vk::StructureType::FENCE_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::FenceCreateFlags::SIGNALED,
-        };
-
-        for _ in 0..MAX_FRAMES_IN_FLIGHT {
-            unsafe {
-                let image_available_semaphore = device
-                    .create_semaphore(&semaphore_create_info, None)
-                    .expect("Failed to create Semaphore Object!");
-                let render_finished_semaphore = device
-                    .create_semaphore(&semaphore_create_info, None)
-                    .expect("Failed to create Semaphore Object!");
-                let inflight_fence = device
-                    .create_fence(&fence_create_info, None)
-                    .expect("Failed to create Fence Object!");
-
-                sync_objects
-                    .image_available_semaphores
-                    .push(image_available_semaphore);
-                sync_objects
-                    .render_finished_semaphores
-                    .push(render_finished_semaphore);
-                sync_objects.inflight_fences.push(inflight_fence);
-            }
-        }
-
-        sync_objects
     }
 }
 
