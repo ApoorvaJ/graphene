@@ -447,8 +447,44 @@ impl VulkanApp {
                 images,
             }
         };
-        let swapchain_imageviews =
-            share::v1::create_image_views(&device, swapchain.format, &swapchain.images);
+        // 9. Image views
+        let swapchain_imageviews = {
+            let imageviews: Vec<vk::ImageView> = swapchain
+                .images
+                .iter()
+                .map(|&image| {
+                    let imageview_create_info = vk::ImageViewCreateInfo {
+                        s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+                        p_next: ptr::null(),
+                        flags: vk::ImageViewCreateFlags::empty(),
+                        view_type: vk::ImageViewType::TYPE_2D,
+                        format: swapchain.format,
+                        components: vk::ComponentMapping {
+                            r: vk::ComponentSwizzle::IDENTITY,
+                            g: vk::ComponentSwizzle::IDENTITY,
+                            b: vk::ComponentSwizzle::IDENTITY,
+                            a: vk::ComponentSwizzle::IDENTITY,
+                        },
+                        subresource_range: vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        },
+                        image,
+                    };
+
+                    unsafe {
+                        device
+                            .create_image_view(&imageview_create_info, None)
+                            .expect("Failed to create Image View!")
+                    }
+                })
+                .collect();
+
+            imageviews
+        };
         let render_pass = VulkanApp::create_render_pass(&device, swapchain.format);
         let (graphics_pipeline, pipeline_layout) =
             share::v1::create_graphics_pipeline(&device, render_pass, swapchain.extent);
