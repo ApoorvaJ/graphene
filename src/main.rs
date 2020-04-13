@@ -69,6 +69,10 @@ struct VulkanApp {
     current_frame: usize,
 }
 
+// This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`
+// member expects a *u32, but `include_bytes!()` produces a Vec<u8>.
+// TODO: Investigate how to properly address this.
+#[allow(clippy::cast_ptr_alignment)]
 fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
     let shader_module_create_info = vk::ShaderModuleCreateInfo {
         s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
@@ -113,7 +117,7 @@ impl VulkanApp {
         // 3. Create Vulkan instance
         let instance = {
             // Ensure that all desired validation layers are available
-            if validation_layers.len() > 0 {
+            if !validation_layers.is_empty() {
                 // Enumerate available validation layers
                 let layer_props = entry
                     .enumerate_instance_layer_properties()
@@ -123,7 +127,7 @@ impl VulkanApp {
                     let is_layer_found = layer_props
                         .iter()
                         .any(|&prop| tools::vk_to_string(&prop.layer_name) == *layer);
-                    if is_layer_found == false {
+                    if !is_layer_found {
                         panic!(
                             "Validation layer '{}' requested, but not found. \
                                (1) Install the Vulkan SDK and set up validation layers, \
@@ -135,12 +139,13 @@ impl VulkanApp {
             }
 
             let app_name = CString::new(WINDOW_TITLE).unwrap();
+            let engine_name = CString::new("grapheme").unwrap();
             let app_info = vk::ApplicationInfo {
                 p_application_name: app_name.as_ptr(),
                 s_type: vk::StructureType::APPLICATION_INFO,
                 p_next: ptr::null(),
                 application_version: vk_make_version!(1, 0, 0),
-                p_engine_name: CString::new("grapheme").unwrap().as_ptr(),
+                p_engine_name: engine_name.as_ptr(),
                 engine_version: vk_make_version!(1, 0, 0),
                 api_version: vk_make_version!(1, 0, 92),
             };
@@ -162,7 +167,7 @@ impl VulkanApp {
 
             let create_info = vk::InstanceCreateInfo {
                 s_type: vk::StructureType::INSTANCE_CREATE_INFO,
-                p_next: if validation_layers.len() > 0 {
+                p_next: if !validation_layers.is_empty() {
                     &debug_utils_create_info as *const vk::DebugUtilsMessengerCreateInfoEXT
                         as *const c_void
                 } else {
@@ -170,16 +175,12 @@ impl VulkanApp {
                 },
                 flags: vk::InstanceCreateFlags::empty(),
                 p_application_info: &app_info,
-                pp_enabled_layer_names: if validation_layers.len() > 0 {
+                pp_enabled_layer_names: if !validation_layers.is_empty() {
                     layer_names.as_ptr()
                 } else {
                     ptr::null()
                 },
-                enabled_layer_count: if validation_layers.len() > 0 {
-                    layer_names.len()
-                } else {
-                    0
-                } as u32,
+                enabled_layer_count: validation_layers.len() as u32,
                 pp_enabled_extension_names: extension_names.as_ptr(),
                 enabled_extension_count: extension_names.len() as u32,
             };
@@ -204,17 +205,15 @@ impl VulkanApp {
         // 5. Debug messenger callback
         let debug_utils_ext_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
         let debug_messenger = {
-            if ENABLE_DEBUG_MESSENGER_CALLBACK == false {
+            if !ENABLE_DEBUG_MESSENGER_CALLBACK {
                 ash::vk::DebugUtilsMessengerEXT::null()
             } else {
                 let messenger_ci = populate_debug_messenger_create_info();
-                let utils_messenger = unsafe {
+                unsafe {
                     debug_utils_ext_loader
                         .create_debug_utils_messenger(&messenger_ci, None)
                         .expect("Debug Utils Callback")
-                };
-
-                utils_messenger
+                }
             }
         };
         // 6. Pick physical device and queue family indices
@@ -306,24 +305,23 @@ impl VulkanApp {
                 };
                 let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
 
-                if opt_graphics_queue_idx.is_some()
-                    && opt_present_queue_idx.is_some()
-                    && opt_swapchain_support.is_some()
-                    && is_device_extension_supported
-                    && is_support_sampler_anisotropy
-                {
+                if is_device_extension_supported && is_support_sampler_anisotropy {
                     if let Some(swapchain_support) = opt_swapchain_support {
                         if !swapchain_support.formats.is_empty()
                             && !swapchain_support.present_modes.is_empty()
                         {
-                            // Compatible physical device found
-                            opt_compat = Some(Compat {
-                                physical_device,
-                                swapchain_support,
-                                graphics_queue_idx: opt_graphics_queue_idx.unwrap() as u32,
-                                present_queue_idx: opt_present_queue_idx.unwrap() as u32,
-                            });
-                            break;
+                            if let Some(graphics_queue_idx) = opt_graphics_queue_idx {
+                                if let Some(present_queue_idx) = opt_present_queue_idx {
+                                    // Compatible physical device found
+                                    opt_compat = Some(Compat {
+                                        physical_device,
+                                        swapchain_support,
+                                        graphics_queue_idx: graphics_queue_idx as u32,
+                                        present_queue_idx: present_queue_idx as u32,
+                                    });
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -399,7 +397,7 @@ impl VulkanApp {
         // 8. Create swapchain
         let swapchain = {
             let surface_format: vk::SurfaceFormatKHR = {
-                swapchain_support
+                *swapchain_support
                     .formats
                     .iter()
                     .find(|&f| {
@@ -407,15 +405,13 @@ impl VulkanApp {
                             && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
                     })
                     .unwrap_or(&swapchain_support.formats[0])
-                    .clone()
             };
             let present_mode: vk::PresentModeKHR = {
-                swapchain_support
+                *swapchain_support
                     .present_modes
                     .iter()
                     .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
                     .unwrap_or(&vk::PresentModeKHR::FIFO)
-                    .clone()
             };
             let extent = {
                 let caps = &swapchain_support.capabilities;
@@ -803,7 +799,7 @@ impl VulkanApp {
 
         // 12. Create framebuffers
         let swapchain_framebuffers: Vec<vk::Framebuffer> = {
-            let framebuffers = swapchain_imageviews
+            swapchain_imageviews
                 .iter()
                 .map(|&imageview| {
                     let attachments = [imageview];
@@ -826,9 +822,7 @@ impl VulkanApp {
                             .expect("Failed to create Framebuffer!")
                     }
                 })
-                .collect();
-
-            framebuffers
+                .collect()
         };
 
         // 13. Create command pool
@@ -970,7 +964,7 @@ impl VulkanApp {
             window,
             // vulkan stuff
             _entry: entry,
-            validation_layers: validation_layers,
+            validation_layers,
             instance,
             surface,
             debug_utils_ext_loader,
@@ -1109,7 +1103,7 @@ impl Drop for VulkanApp {
                 .ext_loader
                 .destroy_surface(self.surface.handle, None);
 
-            if self.validation_layers.len() > 0 {
+            if !self.validation_layers.is_empty() {
                 self.debug_utils_ext_loader
                     .destroy_debug_utils_messenger(self.debug_messenger, None);
             }
@@ -1131,6 +1125,9 @@ impl VulkanApp {
                         ..
                     } => match (virtual_keycode, state) {
                         (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
+                            *control_flow = ControlFlow::Exit
+                        }
+                        (Some(VirtualKeyCode::Return), ElementState::Pressed) => {
                             *control_flow = ControlFlow::Exit
                         }
                         _ => {}
