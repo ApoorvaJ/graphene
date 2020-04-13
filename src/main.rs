@@ -193,16 +193,18 @@ impl VulkanApp {
             };
             // Pick the first compatible physical device
             struct Compat {
-                device: vk::PhysicalDevice,
+                physical_device: vk::PhysicalDevice,
                 graphics_queue_idx: u32,
                 present_queue_idx: u32,
             }
             let mut opt_compat: Option<Compat> = None;
-            for &device in physical_devices.iter() {
-                let device_features = unsafe { instance.get_physical_device_features(device) };
+            for &physical_device in physical_devices.iter() {
+                let device_features =
+                    unsafe { instance.get_physical_device_features(physical_device) };
 
-                let queue_families =
-                    unsafe { instance.get_physical_device_queue_family_properties(device) };
+                let queue_families = unsafe {
+                    instance.get_physical_device_queue_family_properties(physical_device)
+                };
 
                 let opt_graphics_queue_idx = queue_families.iter().position(|&fam| {
                     fam.queue_count > 0 && fam.queue_flags.contains(vk::QueueFlags::GRAPHICS)
@@ -210,8 +212,11 @@ impl VulkanApp {
                 let opt_present_queue_idx =
                     queue_families.iter().enumerate().position(|(i, &fam)| {
                         let is_present_supported = unsafe {
-                            surface_ext_loader
-                                .get_physical_device_surface_support(device, i as u32, surface)
+                            surface_ext_loader.get_physical_device_surface_support(
+                                physical_device,
+                                i as u32,
+                                surface,
+                            )
                         };
                         fam.queue_count > 0 && is_present_supported
                     });
@@ -220,7 +225,7 @@ impl VulkanApp {
                     // Query available extensions
                     let props = unsafe {
                         instance
-                            .enumerate_device_extension_properties(device)
+                            .enumerate_device_extension_properties(physical_device)
                             .expect("Failed to get device extension properties.")
                     };
                     let available_exts: Vec<String> = props
@@ -236,8 +241,11 @@ impl VulkanApp {
                 };
 
                 let is_swapchain_supported = if is_device_extension_supported {
-                    let swapchain_support =
-                        share::query_swapchain_support(device, surface, &surface_ext_loader);
+                    let swapchain_support = share::query_swapchain_support(
+                        physical_device,
+                        surface,
+                        &surface_ext_loader,
+                    );
                     !swapchain_support.formats.is_empty()
                         && !swapchain_support.present_modes.is_empty()
                 } else {
@@ -252,7 +260,7 @@ impl VulkanApp {
                     && is_support_sampler_anisotropy
                 {
                     opt_compat = Some(Compat {
-                        device,
+                        physical_device,
                         graphics_queue_idx: opt_graphics_queue_idx.unwrap() as u32,
                         present_queue_idx: opt_present_queue_idx.unwrap() as u32,
                     });
@@ -262,7 +270,7 @@ impl VulkanApp {
 
             match opt_compat {
                 Some(compat) => (
-                    compat.device,
+                    compat.physical_device,
                     compat.graphics_queue_idx,
                     compat.present_queue_idx,
                 ),
