@@ -23,6 +23,11 @@ struct SyncObjects {
     inflight_fences: Vec<vk::Fence>,
 }
 
+struct Surface {
+    handle: vk::SurfaceKHR,
+    ext_loader: ash::extensions::khr::Surface,
+}
+
 struct Swapchain {
     pub handle: vk::SwapchainKHR,
     pub ext_loader: ash::extensions::khr::Swapchain,
@@ -37,8 +42,7 @@ struct VulkanApp {
     _entry: ash::Entry,
     validation_layers: Vec<String>,
     instance: ash::Instance,
-    surface_ext_loader: ash::extensions::khr::Surface,
-    surface: vk::SurfaceKHR,
+    surface: Surface,
     debug_utils_ext_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
 
@@ -173,11 +177,14 @@ impl VulkanApp {
             instance
         };
         // 4. Create surface
-        let surface = unsafe {
-            platforms::create_surface(&entry, &instance, &window)
-                .expect("Failed to create surface.")
+        let surface = {
+            let handle = unsafe {
+                platforms::create_surface(&entry, &instance, &window)
+                    .expect("Failed to create surface.")
+            };
+            let ext_loader = ash::extensions::khr::Surface::new(&entry, &instance);
+            Surface { handle, ext_loader }
         };
-        let surface_ext_loader = ash::extensions::khr::Surface::new(&entry, &instance);
         // 5. Debug messenger callback
         let debug_utils_ext_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
         let debug_messenger = {
@@ -223,10 +230,10 @@ impl VulkanApp {
                 let opt_present_queue_idx =
                     queue_families.iter().enumerate().position(|(i, &fam)| {
                         let is_present_supported = unsafe {
-                            surface_ext_loader.get_physical_device_surface_support(
+                            surface.ext_loader.get_physical_device_surface_support(
                                 physical_device,
                                 i as u32,
-                                surface,
+                                surface.handle,
                             )
                         };
                         fam.queue_count > 0 && is_present_supported
@@ -253,14 +260,23 @@ impl VulkanApp {
 
                 let opt_swapchain_support = if is_device_extension_supported {
                     unsafe {
-                        let capabilities = surface_ext_loader
-                            .get_physical_device_surface_capabilities(physical_device, surface)
+                        let capabilities = surface
+                            .ext_loader
+                            .get_physical_device_surface_capabilities(
+                                physical_device,
+                                surface.handle,
+                            )
                             .expect("Failed to query for surface capabilities.");
-                        let formats = surface_ext_loader
-                            .get_physical_device_surface_formats(physical_device, surface)
+                        let formats = surface
+                            .ext_loader
+                            .get_physical_device_surface_formats(physical_device, surface.handle)
                             .expect("Failed to query for surface formats.");
-                        let present_modes = surface_ext_loader
-                            .get_physical_device_surface_present_modes(physical_device, surface)
+                        let present_modes = surface
+                            .ext_loader
+                            .get_physical_device_surface_present_modes(
+                                physical_device,
+                                surface.handle,
+                            )
                             .expect("Failed to query for surface present mode.");
 
                         Some(SwapchainSupport {
@@ -393,7 +409,7 @@ impl VulkanApp {
                 s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
                 p_next: ptr::null(),
                 flags: vk::SwapchainCreateFlagsKHR::empty(),
-                surface: surface,
+                surface: surface.handle,
                 min_image_count: image_count,
                 image_color_space: surface_format.color_space,
                 image_format: surface_format.format,
@@ -460,8 +476,7 @@ impl VulkanApp {
             _entry: entry,
             validation_layers: validation_layers,
             instance,
-            surface: surface,
-            surface_ext_loader,
+            surface,
             debug_utils_ext_loader,
             debug_messenger,
 
@@ -671,6 +686,8 @@ impl VulkanApp {
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
+            // TODO: Move these into their own sub-object drop traits.
+            // e.g. Swapchains and surfaces can have their own drops.
             for i in 0..MAX_FRAMES_IN_FLIGHT {
                 self.device
                     .destroy_semaphore(self.image_available_semaphores[i], None);
@@ -698,7 +715,9 @@ impl Drop for VulkanApp {
                 .ext_loader
                 .destroy_swapchain(self.swapchain.handle, None);
             self.device.destroy_device(None);
-            self.surface_ext_loader.destroy_surface(self.surface, None);
+            self.surface
+                .ext_loader
+                .destroy_surface(self.surface.handle, None);
 
             if self.validation_layers.len() > 0 {
                 self.debug_utils_ext_loader
