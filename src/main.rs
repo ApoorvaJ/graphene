@@ -1,5 +1,5 @@
 mod utility;
-use crate::{utility::debug::*, utility::share, utility::*};
+use crate::{utility::debug::*, utility::*};
 
 use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
@@ -398,10 +398,41 @@ impl VulkanApp {
         };
         // 8. Create swapchain
         let swapchain = {
-            let surface_format = share::choose_swapchain_format(&swapchain_support.formats);
-            let present_mode =
-                share::choose_swapchain_present_mode(&swapchain_support.present_modes);
-            let extent = share::choose_swapchain_extent(&swapchain_support.capabilities, &window);
+            let surface_format: vk::SurfaceFormatKHR = {
+                swapchain_support
+                    .formats
+                    .iter()
+                    .find(|&f| {
+                        f.format == vk::Format::B8G8R8A8_SRGB
+                            && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                    })
+                    .unwrap_or(&swapchain_support.formats[0])
+                    .clone()
+            };
+            let present_mode: vk::PresentModeKHR = {
+                swapchain_support
+                    .present_modes
+                    .iter()
+                    .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
+                    .unwrap_or(&vk::PresentModeKHR::FIFO)
+                    .clone()
+            };
+            let extent = {
+                let caps = &swapchain_support.capabilities;
+                if caps.current_extent.width != u32::max_value() {
+                    caps.current_extent
+                } else {
+                    let window_size = window.inner_size();
+                    vk::Extent2D {
+                        width: (window_size.width as u32)
+                            .max(caps.min_image_extent.width)
+                            .min(caps.max_image_extent.width),
+                        height: (window_size.height as u32)
+                            .max(caps.min_image_extent.height)
+                            .min(caps.max_image_extent.height),
+                    }
+                }
+            };
 
             let image_count = swapchain_support.capabilities.min_image_count + 1;
             let image_count = if swapchain_support.capabilities.max_image_count > 0 {
