@@ -25,12 +25,10 @@ struct SyncObjects {
 
 struct Surface {
     handle: vk::SurfaceKHR,
-    ext_loader: ash::extensions::khr::Surface,
 }
 
 struct Swapchain {
     pub handle: vk::SwapchainKHR,
-    pub ext_loader: ash::extensions::khr::Swapchain,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
     pub images: Vec<vk::Image>,
@@ -38,13 +36,19 @@ struct Swapchain {
 
 struct VulkanApp {
     window: winit::window::Window,
+
     // Vulkan
     _entry: ash::Entry,
-    validation_layers: Vec<String>,
     instance: ash::Instance,
+    // - Extensions
+    ext_debug_utils: ash::extensions::ext::DebugUtils,
+    ext_surface: ash::extensions::khr::Surface,
+    ext_swapchain: ash::extensions::khr::Swapchain,
+
     surface: Surface,
-    debug_utils_ext_loader: ash::extensions::ext::DebugUtils,
+
     debug_messenger: vk::DebugUtilsMessengerEXT,
+    validation_layers: Vec<String>,
 
     _physical_device: vk::PhysicalDevice,
     device: ash::Device,
@@ -92,8 +96,6 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
 impl VulkanApp {
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
         const WINDOW_TITLE: &str = "Hello Triangle";
-        const WINDOW_WIDTH: u32 = 800;
-        const WINDOW_HEIGHT: u32 = 600;
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
@@ -108,7 +110,7 @@ impl VulkanApp {
         let window = {
             winit::window::WindowBuilder::new()
                 .with_title(WINDOW_TITLE)
-                .with_inner_size(winit::dpi::LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+                .with_inner_size(winit::dpi::LogicalSize::new(800, 600))
                 .build(event_loop)
                 .expect("Failed to create window.")
         };
@@ -194,23 +196,23 @@ impl VulkanApp {
             instance
         };
         // 4. Create surface
+        let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
         let surface = {
             let handle = unsafe {
                 platforms::create_surface(&entry, &instance, &window)
                     .expect("Failed to create surface.")
             };
-            let ext_loader = ash::extensions::khr::Surface::new(&entry, &instance);
-            Surface { handle, ext_loader }
+            Surface { handle }
         };
         // 5. Debug messenger callback
-        let debug_utils_ext_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+        let ext_debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
         let debug_messenger = {
             if !ENABLE_DEBUG_MESSENGER_CALLBACK {
                 ash::vk::DebugUtilsMessengerEXT::null()
             } else {
                 let messenger_ci = populate_debug_messenger_create_info();
                 unsafe {
-                    debug_utils_ext_loader
+                    ext_debug_utils
                         .create_debug_utils_messenger(&messenger_ci, None)
                         .expect("Debug Utils Callback")
                 }
@@ -245,7 +247,7 @@ impl VulkanApp {
                 let opt_present_queue_idx =
                     queue_families.iter().enumerate().position(|(i, &fam)| {
                         let is_present_supported = unsafe {
-                            surface.ext_loader.get_physical_device_surface_support(
+                            ext_surface.get_physical_device_surface_support(
                                 physical_device,
                                 i as u32,
                                 surface.handle,
@@ -275,19 +277,16 @@ impl VulkanApp {
 
                 let opt_swapchain_support = if is_device_extension_supported {
                     unsafe {
-                        let capabilities = surface
-                            .ext_loader
+                        let capabilities = ext_surface
                             .get_physical_device_surface_capabilities(
                                 physical_device,
                                 surface.handle,
                             )
                             .expect("Failed to query for surface capabilities.");
-                        let formats = surface
-                            .ext_loader
+                        let formats = ext_surface
                             .get_physical_device_surface_formats(physical_device, surface.handle)
                             .expect("Failed to query for surface formats.");
-                        let present_modes = surface
-                            .ext_loader
+                        let present_modes = ext_surface
                             .get_physical_device_surface_present_modes(
                                 physical_device,
                                 surface.handle,
@@ -395,6 +394,7 @@ impl VulkanApp {
             (device, graphics_queue, present_queue)
         };
         // 8. Create swapchain
+        let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &device);
         let swapchain = {
             let surface_format: vk::SurfaceFormatKHR = {
                 *swapchain_support
@@ -469,22 +469,20 @@ impl VulkanApp {
                 image_array_layers: 1,
             };
 
-            let ext_loader = ash::extensions::khr::Swapchain::new(&instance, &device);
             let handle = unsafe {
-                ext_loader
+                ext_swapchain
                     .create_swapchain(&swapchain_create_info, None)
                     .expect("Failed to create Swapchain!")
             };
 
             let images = unsafe {
-                ext_loader
+                ext_swapchain
                     .get_swapchain_images(handle)
                     .expect("Failed to get Swapchain Images.")
             };
 
             Swapchain {
                 handle,
-                ext_loader,
                 format: surface_format.format,
                 extent,
                 images,
@@ -959,16 +957,20 @@ impl VulkanApp {
             sync_objects
         };
 
-        // cleanup(); the 'drop' function will take care of it.
         VulkanApp {
             window,
-            // vulkan stuff
+            // Vulkan
             _entry: entry,
-            validation_layers,
             instance,
+            // - Extensions
+            ext_debug_utils,
+            ext_surface,
+            ext_swapchain,
+
             surface,
-            debug_utils_ext_loader,
+
             debug_messenger,
+            validation_layers,
 
             _physical_device: physical_device,
             device,
@@ -1002,8 +1004,7 @@ impl VulkanApp {
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
                 .expect("Failed to wait for Fence!");
 
-            self.swapchain
-                .ext_loader
+            self.ext_swapchain
                 .acquire_next_image(
                     self.swapchain.handle,
                     std::u64::MAX,
@@ -1057,8 +1058,7 @@ impl VulkanApp {
         };
 
         unsafe {
-            self.swapchain
-                .ext_loader
+            self.ext_swapchain
                 .queue_present(self.present_queue, &present_info)
                 .expect("Failed to execute queue present.");
         }
@@ -1095,16 +1095,13 @@ impl Drop for VulkanApp {
                 self.device.destroy_image_view(imageview, None);
             }
 
-            self.swapchain
-                .ext_loader
+            self.ext_swapchain
                 .destroy_swapchain(self.swapchain.handle, None);
             self.device.destroy_device(None);
-            self.surface
-                .ext_loader
-                .destroy_surface(self.surface.handle, None);
+            self.ext_surface.destroy_surface(self.surface.handle, None);
 
             if !self.validation_layers.is_empty() {
-                self.debug_utils_ext_loader
+                self.ext_debug_utils
                     .destroy_debug_utils_messenger(self.debug_messenger, None);
             }
             self.instance.destroy_instance(None);
