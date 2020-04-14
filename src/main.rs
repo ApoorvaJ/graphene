@@ -17,7 +17,8 @@ use std::ptr;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 struct Gpu {
-    physical_device: vk::PhysicalDevice,
+    // Physical device
+    _physical_device: vk::PhysicalDevice,
     _exts: Vec<vk::ExtensionProperties>,
     surface_caps: vk::SurfaceCapabilitiesKHR,
     surface_formats: Vec<vk::SurfaceFormatKHR>,
@@ -26,6 +27,10 @@ struct Gpu {
     _properties: vk::PhysicalDeviceProperties,
     graphics_queue_idx: u32,
     present_queue_idx: u32,
+    // Logical device
+    device: ash::Device,
+    graphics_queue: vk::Queue,
+    present_queue: vk::Queue,
 }
 
 struct SyncObjects {
@@ -56,16 +61,12 @@ struct VulkanApp {
     ext_surface: ash::extensions::khr::Surface,
     ext_swapchain: ash::extensions::khr::Swapchain,
 
+    gpu: Gpu,
+
     surface: Surface,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
-
-    gpu: Gpu,
-    device: ash::Device,
-
-    graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
 
     swapchain: Swapchain,
     swapchain_imageviews: Vec<vk::ImageView>,
@@ -207,15 +208,26 @@ impl VulkanApp {
             Surface { handle }
         };
 
-        // # Pick a physical device
-        let gpu = {
+        // # Enumerate eligible GPUs
+        struct CandidateGpu {
+            physical_device: vk::PhysicalDevice,
+            exts: Vec<vk::ExtensionProperties>,
+            surface_caps: vk::SurfaceCapabilitiesKHR,
+            surface_formats: Vec<vk::SurfaceFormatKHR>,
+            present_modes: Vec<vk::PresentModeKHR>,
+            memory_properties: vk::PhysicalDeviceMemoryProperties,
+            properties: vk::PhysicalDeviceProperties,
+            graphics_queue_idx: u32,
+            present_queue_idx: u32,
+        }
+        let candidate_gpus: Vec<CandidateGpu> = {
             let physical_devices = unsafe {
                 &instance
                     .enumerate_physical_devices()
                     .expect("Failed to enumerate Physical Devices!")
             };
 
-            let mut opt_gpu = None;
+            let mut candidate_gpus = Vec::new();
 
             for &physical_device in physical_devices {
                 let exts = unsafe {
@@ -261,10 +273,11 @@ impl VulkanApp {
                     continue;
                 }
 
-                let _memory_properties =
+                let memory_properties =
                     unsafe { instance.get_physical_device_memory_properties(physical_device) };
-                let _properties =
+                let properties =
                     unsafe { instance.get_physical_device_properties(physical_device) };
+
                 // Queue family indices
                 let queue_families = unsafe {
                     instance.get_physical_device_queue_family_properties(physical_device)
@@ -283,17 +296,21 @@ impl VulkanApp {
                         };
                         fam.queue_count > 0 && is_present_supported
                     });
+                // Is there a graphics queue and a present queue?
+                if opt_graphics_queue_idx.is_none() || opt_present_queue_idx.is_none() {
+                    continue;
+                }
 
                 if let Some(graphics_queue_idx) = opt_graphics_queue_idx {
                     if let Some(present_queue_idx) = opt_present_queue_idx {
-                        opt_gpu = Some(Gpu {
+                        candidate_gpus.push(CandidateGpu {
                             physical_device,
-                            _exts: exts,
+                            exts,
                             surface_caps,
                             surface_formats,
                             present_modes,
-                            _memory_properties,
-                            _properties,
+                            memory_properties,
+                            properties,
                             graphics_queue_idx: graphics_queue_idx as u32,
                             present_queue_idx: present_queue_idx as u32,
                         });
@@ -301,16 +318,22 @@ impl VulkanApp {
                 }
             }
 
-            opt_gpu.expect("Failed to find a suitable GPU.")
+            candidate_gpus
         };
 
-        // # Create logical device
-        // TODO: Create a member logical_device in the Gpu struct
-        let device = {
+        // # Create a logical device, queues, and the final gpu struct
+        let gpu = {
+            // Pick the most eligible of the candidate GPU.
+            // Currently, we just pick the first one. Winner winner chicken dinner!
+            // TODO: Might want to pick the most powerful GPU in the future.
+            let cgpu = candidate_gpus
+                .first()
+                .expect("Failed to find a suitable GPU.");
+
             use std::collections::HashSet;
             let mut unique_queue_families = HashSet::new();
-            unique_queue_families.insert(gpu.graphics_queue_idx);
-            unique_queue_families.insert(gpu.present_queue_idx);
+            unique_queue_families.insert(cgpu.graphics_queue_idx);
+            unique_queue_families.insert(cgpu.present_queue_idx);
 
             let queue_priorities = [1.0_f32];
             let mut queue_create_infos = vec![];
@@ -353,11 +376,29 @@ impl VulkanApp {
 
             let device: ash::Device = unsafe {
                 instance
-                    .create_device(gpu.physical_device, &device_create_info, None)
+                    .create_device(cgpu.physical_device, &device_create_info, None)
                     .expect("Failed to create logical Device!")
             };
 
-            device
+            let graphics_queue = unsafe { device.get_device_queue(cgpu.graphics_queue_idx, 0) };
+            let present_queue = unsafe { device.get_device_queue(cgpu.present_queue_idx, 0) };
+
+            Gpu {
+                // Physical device
+                _physical_device: cgpu.physical_device,
+                _exts: cgpu.exts.clone(),
+                surface_caps: cgpu.surface_caps,
+                surface_formats: cgpu.surface_formats.clone(),
+                present_modes: cgpu.present_modes.clone(),
+                _memory_properties: cgpu.memory_properties,
+                _properties: cgpu.properties,
+                graphics_queue_idx: cgpu.graphics_queue_idx,
+                present_queue_idx: cgpu.present_queue_idx,
+                // Logical device
+                device,
+                graphics_queue,
+                present_queue,
+            }
         };
 
         // 8. Create command pool
@@ -370,14 +411,14 @@ impl VulkanApp {
             };
 
             unsafe {
-                device
+                gpu.device
                     .create_command_pool(&command_pool_create_info, None)
                     .expect("Failed to create Command Pool!")
             }
         };
 
         // 9. Create swapchain
-        let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &device);
+        let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
         let swapchain = {
             let surface_format: vk::SurfaceFormatKHR = {
                 *gpu.surface_formats
@@ -497,7 +538,7 @@ impl VulkanApp {
                     };
 
                     unsafe {
-                        device
+                        gpu.device
                             .create_image_view(&imageview_create_info, None)
                             .expect("Failed to create Image View!")
                     }
@@ -563,7 +604,7 @@ impl VulkanApp {
             };
 
             unsafe {
-                device
+                gpu.device
                     .create_render_pass(&renderpass_create_info, None)
                     .expect("Failed to create render pass!")
             }
@@ -571,11 +612,11 @@ impl VulkanApp {
         // 12. Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
-                &device,
+                &gpu.device,
                 include_bytes!("../shaders/spv/09-shader-base.vert.spv").to_vec(),
             );
             let frag_shader_module = create_shader_module(
-                &device,
+                &gpu.device,
                 include_bytes!("../shaders/spv/09-shader-base.frag.spv").to_vec(),
             );
 
@@ -730,7 +771,7 @@ impl VulkanApp {
             };
 
             let pipeline_layout = unsafe {
-                device
+                gpu.device
                     .create_pipeline_layout(&pipeline_layout_create_info, None)
                     .expect("Failed to create pipeline layout!")
             };
@@ -758,7 +799,7 @@ impl VulkanApp {
             }];
 
             let graphics_pipelines = unsafe {
-                device
+                gpu.device
                     .create_graphics_pipelines(
                         vk::PipelineCache::null(),
                         &graphic_pipeline_create_infos,
@@ -768,8 +809,8 @@ impl VulkanApp {
             };
 
             unsafe {
-                device.destroy_shader_module(vert_shader_module, None);
-                device.destroy_shader_module(frag_shader_module, None);
+                gpu.device.destroy_shader_module(vert_shader_module, None);
+                gpu.device.destroy_shader_module(frag_shader_module, None);
             }
 
             (graphics_pipelines[0], pipeline_layout)
@@ -795,7 +836,7 @@ impl VulkanApp {
                     };
 
                     unsafe {
-                        device
+                        gpu.device
                             .create_framebuffer(&framebuffer_create_info, None)
                             .expect("Failed to create Framebuffer!")
                     }
@@ -814,7 +855,7 @@ impl VulkanApp {
             };
 
             let command_buffers = unsafe {
-                device
+                gpu.device
                     .allocate_command_buffers(&command_buffer_allocate_info)
                     .expect("Failed to allocate Command Buffers!")
             };
@@ -828,7 +869,7 @@ impl VulkanApp {
                 };
 
                 unsafe {
-                    device
+                    gpu.device
                         .begin_command_buffer(command_buffer, &command_buffer_begin_info)
                         .expect("Failed to begin recording Command Buffer at beginning!");
                 }
@@ -853,21 +894,21 @@ impl VulkanApp {
                 };
 
                 unsafe {
-                    device.cmd_begin_render_pass(
+                    gpu.device.cmd_begin_render_pass(
                         command_buffer,
                         &render_pass_begin_info,
                         vk::SubpassContents::INLINE,
                     );
-                    device.cmd_bind_pipeline(
+                    gpu.device.cmd_bind_pipeline(
                         command_buffer,
                         vk::PipelineBindPoint::GRAPHICS,
                         graphics_pipeline,
                     );
-                    device.cmd_draw(command_buffer, 3, 1, 0, 0);
+                    gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
 
-                    device.cmd_end_render_pass(command_buffer);
+                    gpu.device.cmd_end_render_pass(command_buffer);
 
-                    device
+                    gpu.device
                         .end_command_buffer(command_buffer)
                         .expect("Failed to record Command Buffer at Ending!");
                 }
@@ -898,13 +939,16 @@ impl VulkanApp {
 
             for _ in 0..MAX_FRAMES_IN_FLIGHT {
                 unsafe {
-                    let image_available_semaphore = device
+                    let image_available_semaphore = gpu
+                        .device
                         .create_semaphore(&semaphore_create_info, None)
                         .expect("Failed to create Semaphore Object!");
-                    let render_finished_semaphore = device
+                    let render_finished_semaphore = gpu
+                        .device
                         .create_semaphore(&semaphore_create_info, None)
                         .expect("Failed to create Semaphore Object!");
-                    let inflight_fence = device
+                    let inflight_fence = gpu
+                        .device
                         .create_fence(&fence_create_info, None)
                         .expect("Failed to create Fence Object!");
 
@@ -921,10 +965,6 @@ impl VulkanApp {
             sync_objects
         };
 
-        //TODO: Remove these members from the VulkanApp struct and inline them into the Gpu struct
-        let graphics_queue = unsafe { device.get_device_queue(gpu.graphics_queue_idx, 0) };
-        let present_queue = unsafe { device.get_device_queue(gpu.present_queue_idx, 0) };
-
         VulkanApp {
             window,
             // Vulkan
@@ -935,16 +975,12 @@ impl VulkanApp {
             ext_surface,
             ext_swapchain,
 
+            gpu,
+
             surface,
 
             debug_messenger,
             validation_layers,
-
-            gpu,
-            device,
-
-            graphics_queue,
-            present_queue,
 
             swapchain,
             swapchain_imageviews,
@@ -968,7 +1004,8 @@ impl VulkanApp {
         let wait_fences = [self.in_flight_fences[self.current_frame]];
 
         let (image_index, _is_sub_optimal) = unsafe {
-            self.device
+            self.gpu
+                .device
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
                 .expect("Failed to wait for Fence!");
 
@@ -999,13 +1036,15 @@ impl VulkanApp {
         }];
 
         unsafe {
-            self.device
+            self.gpu
+                .device
                 .reset_fences(&wait_fences)
                 .expect("Failed to reset Fence!");
 
-            self.device
+            self.gpu
+                .device
                 .queue_submit(
-                    self.graphics_queue,
+                    self.gpu.graphics_queue,
                     &submit_infos,
                     self.in_flight_fences[self.current_frame],
                 )
@@ -1027,7 +1066,7 @@ impl VulkanApp {
 
         unsafe {
             self.ext_swapchain
-                .queue_present(self.present_queue, &present_info)
+                .queue_present(self.gpu.present_queue, &present_info)
                 .expect("Failed to execute queue present.");
         }
 
@@ -1041,31 +1080,40 @@ impl Drop for VulkanApp {
             // TODO: Move these into their own sub-object drop traits.
             // e.g. Swapchains and surfaces can have their own drops.
             for i in 0..MAX_FRAMES_IN_FLIGHT {
-                self.device
+                self.gpu
+                    .device
                     .destroy_semaphore(self.image_available_semaphores[i], None);
-                self.device
+                self.gpu
+                    .device
                     .destroy_semaphore(self.render_finished_semaphores[i], None);
-                self.device.destroy_fence(self.in_flight_fences[i], None);
+                self.gpu
+                    .device
+                    .destroy_fence(self.in_flight_fences[i], None);
             }
 
-            self.device.destroy_command_pool(self.command_pool, None);
+            self.gpu
+                .device
+                .destroy_command_pool(self.command_pool, None);
 
             for &framebuffer in self.swapchain_framebuffers.iter() {
-                self.device.destroy_framebuffer(framebuffer, None);
+                self.gpu.device.destroy_framebuffer(framebuffer, None);
             }
 
-            self.device.destroy_pipeline(self.graphics_pipeline, None);
-            self.device
+            self.gpu
+                .device
+                .destroy_pipeline(self.graphics_pipeline, None);
+            self.gpu
+                .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_render_pass(self.render_pass, None);
+            self.gpu.device.destroy_render_pass(self.render_pass, None);
 
             for &imageview in self.swapchain_imageviews.iter() {
-                self.device.destroy_image_view(imageview, None);
+                self.gpu.device.destroy_image_view(imageview, None);
             }
 
             self.ext_swapchain
                 .destroy_swapchain(self.swapchain.handle, None);
-            self.device.destroy_device(None);
+            self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface.handle, None);
 
             if !self.validation_layers.is_empty() {
@@ -1107,7 +1155,8 @@ impl VulkanApp {
             }
             Event::LoopDestroyed => {
                 unsafe {
-                    self.device
+                    self.gpu
+                        .device
                         .device_wait_idle()
                         .expect("Failed to wait device idle!")
                 };
