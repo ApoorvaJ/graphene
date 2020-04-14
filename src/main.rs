@@ -31,6 +31,7 @@ struct Gpu {
     device: ash::Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
+    command_pool: vk::CommandPool,
 }
 
 struct SyncObjects {
@@ -76,7 +77,6 @@ struct VulkanApp {
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
 
-    command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
 
     image_available_semaphores: Vec<vk::Semaphore>,
@@ -321,7 +321,7 @@ impl VulkanApp {
             candidate_gpus
         };
 
-        // # Create a logical device, queues, and the final gpu struct
+        // # Create a logical device, queues, the command pool, and the final gpu struct
         let gpu = {
             // Pick the most eligible of the candidate GPU.
             // Currently, we just pick the first one. Winner winner chicken dinner!
@@ -383,6 +383,18 @@ impl VulkanApp {
             let graphics_queue = unsafe { device.get_device_queue(cgpu.graphics_queue_idx, 0) };
             let present_queue = unsafe { device.get_device_queue(cgpu.present_queue_idx, 0) };
 
+            let command_pool = {
+                let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
+                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                    .queue_family_index(cgpu.graphics_queue_idx);
+
+                unsafe {
+                    device
+                        .create_command_pool(&command_pool_create_info, None)
+                        .expect("Failed to create Command Pool!")
+                }
+            };
+
             Gpu {
                 // Physical device
                 _physical_device: cgpu.physical_device,
@@ -398,22 +410,7 @@ impl VulkanApp {
                 device,
                 graphics_queue,
                 present_queue,
-            }
-        };
-
-        // 8. Create command pool
-        let command_pool = {
-            let command_pool_create_info = vk::CommandPoolCreateInfo {
-                s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::CommandPoolCreateFlags::empty(),
-                queue_family_index: gpu.graphics_queue_idx,
-            };
-
-            unsafe {
-                gpu.device
-                    .create_command_pool(&command_pool_create_info, None)
-                    .expect("Failed to create Command Pool!")
+                command_pool,
             }
         };
 
@@ -850,7 +847,7 @@ impl VulkanApp {
                 s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: ptr::null(),
                 command_buffer_count: swapchain_framebuffers.len() as u32,
-                command_pool,
+                command_pool: gpu.command_pool,
                 level: vk::CommandBufferLevel::PRIMARY,
             };
 
@@ -990,7 +987,6 @@ impl VulkanApp {
             render_pass,
             graphics_pipeline,
 
-            command_pool,
             command_buffers,
 
             image_available_semaphores: sync_ojbects.image_available_semaphores,
@@ -1093,7 +1089,7 @@ impl Drop for VulkanApp {
 
             self.gpu
                 .device
-                .destroy_command_pool(self.command_pool, None);
+                .destroy_command_pool(self.gpu.command_pool, None);
 
             for &framebuffer in self.swapchain_framebuffers.iter() {
                 self.gpu.device.destroy_framebuffer(framebuffer, None);
