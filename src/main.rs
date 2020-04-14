@@ -32,12 +32,10 @@ struct Gpu {
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
     command_pool: vk::CommandPool,
-}
-
-struct SyncObjects {
+    // Synchronization primitives
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
-    inflight_fences: Vec<vk::Fence>,
+    command_buffer_complete_fences: Vec<vk::Fence>,
 }
 
 struct Surface {
@@ -79,9 +77,6 @@ struct VulkanApp {
 
     command_buffers: Vec<vk::CommandBuffer>,
 
-    image_available_semaphores: Vec<vk::Semaphore>,
-    render_finished_semaphores: Vec<vk::Semaphore>,
-    in_flight_fences: Vec<vk::Fence>,
     current_frame: usize,
 }
 
@@ -321,7 +316,7 @@ impl VulkanApp {
             candidate_gpus
         };
 
-        // # Create a logical device, queues, the command pool, and the final gpu struct
+        // # Create a logical device, queues, the command pool, sync primitives, and the final gpu struct
         let gpu = {
             // Pick the most eligible of the candidate GPU.
             // Currently, we just pick the first one. Winner winner chicken dinner!
@@ -395,6 +390,44 @@ impl VulkanApp {
                 }
             };
 
+            let (
+                image_available_semaphores,
+                render_finished_semaphores,
+                command_buffer_complete_fences,
+            ) = {
+                let mut image_available_semaphores = Vec::new();
+                let mut render_finished_semaphores = Vec::new();
+                let mut command_buffer_complete_fences = Vec::new();
+                let semaphore_create_info = vk::SemaphoreCreateInfo::builder();
+                let fence_create_info =
+                    vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
+
+                for _ in 0..MAX_FRAMES_IN_FLIGHT {
+                    unsafe {
+                        image_available_semaphores.push(
+                            device
+                                .create_semaphore(&semaphore_create_info, None)
+                                .expect("Failed to create Semaphore Object!"),
+                        );
+                        render_finished_semaphores.push(
+                            device
+                                .create_semaphore(&semaphore_create_info, None)
+                                .expect("Failed to create Semaphore Object!"),
+                        );
+                        command_buffer_complete_fences.push(
+                            device
+                                .create_fence(&fence_create_info, None)
+                                .expect("Failed to create Fence Object!"),
+                        );
+                    }
+                }
+                (
+                    image_available_semaphores,
+                    render_finished_semaphores,
+                    command_buffer_complete_fences,
+                )
+            };
+
             Gpu {
                 // Physical device
                 _physical_device: cgpu.physical_device,
@@ -411,6 +444,10 @@ impl VulkanApp {
                 graphics_queue,
                 present_queue,
                 command_pool,
+                // Synchronization primitives
+                image_available_semaphores,
+                render_finished_semaphores,
+                command_buffer_complete_fences,
             }
         };
 
@@ -914,54 +951,6 @@ impl VulkanApp {
             command_buffers
         };
 
-        // 15. Create sync objects
-        let sync_ojbects = {
-            let mut sync_objects = SyncObjects {
-                image_available_semaphores: vec![],
-                render_finished_semaphores: vec![],
-                inflight_fences: vec![],
-            };
-
-            let semaphore_create_info = vk::SemaphoreCreateInfo {
-                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::SemaphoreCreateFlags::empty(),
-            };
-
-            let fence_create_info = vk::FenceCreateInfo {
-                s_type: vk::StructureType::FENCE_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::FenceCreateFlags::SIGNALED,
-            };
-
-            for _ in 0..MAX_FRAMES_IN_FLIGHT {
-                unsafe {
-                    let image_available_semaphore = gpu
-                        .device
-                        .create_semaphore(&semaphore_create_info, None)
-                        .expect("Failed to create Semaphore Object!");
-                    let render_finished_semaphore = gpu
-                        .device
-                        .create_semaphore(&semaphore_create_info, None)
-                        .expect("Failed to create Semaphore Object!");
-                    let inflight_fence = gpu
-                        .device
-                        .create_fence(&fence_create_info, None)
-                        .expect("Failed to create Fence Object!");
-
-                    sync_objects
-                        .image_available_semaphores
-                        .push(image_available_semaphore);
-                    sync_objects
-                        .render_finished_semaphores
-                        .push(render_finished_semaphore);
-                    sync_objects.inflight_fences.push(inflight_fence);
-                }
-            }
-
-            sync_objects
-        };
-
         VulkanApp {
             window,
             // Vulkan
@@ -989,15 +978,12 @@ impl VulkanApp {
 
             command_buffers,
 
-            image_available_semaphores: sync_ojbects.image_available_semaphores,
-            render_finished_semaphores: sync_ojbects.render_finished_semaphores,
-            in_flight_fences: sync_ojbects.inflight_fences,
             current_frame: 0,
         }
     }
 
     fn draw_frame(&mut self) {
-        let wait_fences = [self.in_flight_fences[self.current_frame]];
+        let wait_fences = [self.gpu.command_buffer_complete_fences[self.current_frame]];
 
         let (image_index, _is_sub_optimal) = unsafe {
             self.gpu
@@ -1009,15 +995,15 @@ impl VulkanApp {
                 .acquire_next_image(
                     self.swapchain.handle,
                     std::u64::MAX,
-                    self.image_available_semaphores[self.current_frame],
+                    self.gpu.image_available_semaphores[self.current_frame],
                     vk::Fence::null(),
                 )
                 .expect("Failed to acquire next image.")
         };
 
-        let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
+        let wait_semaphores = [self.gpu.image_available_semaphores[self.current_frame]];
+        let signal_semaphores = [self.gpu.render_finished_semaphores[self.current_frame]];
 
         let submit_infos = [vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
@@ -1042,7 +1028,7 @@ impl VulkanApp {
                 .queue_submit(
                     self.gpu.graphics_queue,
                     &submit_infos,
-                    self.in_flight_fences[self.current_frame],
+                    self.gpu.command_buffer_complete_fences[self.current_frame],
                 )
                 .expect("Failed to execute queue submit.");
         }
@@ -1074,17 +1060,17 @@ impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
             // TODO: Move these into their own sub-object drop traits.
-            // e.g. Swapchains and surfaces can have their own drops.
+            // e.g. the gpu can have its own drop() trait
             for i in 0..MAX_FRAMES_IN_FLIGHT {
                 self.gpu
                     .device
-                    .destroy_semaphore(self.image_available_semaphores[i], None);
+                    .destroy_semaphore(self.gpu.image_available_semaphores[i], None);
                 self.gpu
                     .device
-                    .destroy_semaphore(self.render_finished_semaphores[i], None);
+                    .destroy_semaphore(self.gpu.render_finished_semaphores[i], None);
                 self.gpu
                     .device
-                    .destroy_fence(self.in_flight_fences[i], None);
+                    .destroy_fence(self.gpu.command_buffer_complete_fences[i], None);
             }
 
             self.gpu
