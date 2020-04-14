@@ -11,7 +11,6 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 use std::ffi::CString;
 use std::os::raw::c_char;
-use std::os::raw::c_void;
 use std::ptr;
 
 // Constants
@@ -95,7 +94,7 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
 
 impl VulkanApp {
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
-        const WINDOW_TITLE: &str = "Hello Triangle";
+        const APP_NAME: &str = "Hello Triangle";
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
@@ -106,18 +105,30 @@ impl VulkanApp {
             present_modes: Vec<vk::PresentModeKHR>,
         }
 
-        // 1. Init window
+        // # Init window
         let window = {
             winit::window::WindowBuilder::new()
-                .with_title(WINDOW_TITLE)
+                .with_title(APP_NAME)
                 .with_inner_size(winit::dpi::LogicalSize::new(800, 600))
                 .build(event_loop)
                 .expect("Failed to create window.")
         };
-        // 2. Init Ash
+
+        // # Init Ash
         let entry = ash::Entry::new().unwrap();
-        // 3. Create Vulkan instance
+
+        // # Create Vulkan instance
         let instance = {
+            let app_name = CString::new(APP_NAME).unwrap();
+            let engine_name = CString::new("grapheme").unwrap();
+            let app_info = vk::ApplicationInfo::builder()
+                .application_name(&app_name)
+                .application_version(vk_make_version!(1, 0, 0))
+                .engine_name(&engine_name)
+                .engine_version(vk_make_version!(1, 0, 0))
+                .api_version(vk_make_version!(1, 0, 92))
+                .build();
+
             // Ensure that all desired validation layers are available
             if !validation_layers.is_empty() {
                 // Enumerate available validation layers
@@ -140,52 +151,21 @@ impl VulkanApp {
                 }
             }
 
-            let app_name = CString::new(WINDOW_TITLE).unwrap();
-            let engine_name = CString::new("grapheme").unwrap();
-            let app_info = vk::ApplicationInfo {
-                p_application_name: app_name.as_ptr(),
-                s_type: vk::StructureType::APPLICATION_INFO,
-                p_next: ptr::null(),
-                application_version: vk_make_version!(1, 0, 0),
-                p_engine_name: engine_name.as_ptr(),
-                engine_version: vk_make_version!(1, 0, 0),
-                api_version: vk_make_version!(1, 0, 92),
-            };
-
-            // This create info used to debug issues in vk::createInstance and vk::destroyInstance.
-            let debug_utils_create_info = debug::populate_debug_messenger_create_info();
-
-            // VK_EXT debug report has been requested here.
-            let extension_names = platforms::required_extension_names();
-
             let required_validation_layer_raw_names: Vec<CString> = validation_layers
                 .iter()
                 .map(|layer_name| CString::new(layer_name.to_string()).unwrap())
                 .collect();
-            let layer_names: Vec<*const i8> = required_validation_layer_raw_names
+            let layer_names: Vec<*const c_char> = required_validation_layer_raw_names
                 .iter()
                 .map(|layer_name| layer_name.as_ptr())
                 .collect();
 
-            let create_info = vk::InstanceCreateInfo {
-                s_type: vk::StructureType::INSTANCE_CREATE_INFO,
-                p_next: if !validation_layers.is_empty() {
-                    &debug_utils_create_info as *const vk::DebugUtilsMessengerCreateInfoEXT
-                        as *const c_void
-                } else {
-                    ptr::null()
-                },
-                flags: vk::InstanceCreateFlags::empty(),
-                p_application_info: &app_info,
-                pp_enabled_layer_names: if !validation_layers.is_empty() {
-                    layer_names.as_ptr()
-                } else {
-                    ptr::null()
-                },
-                enabled_layer_count: validation_layers.len() as u32,
-                pp_enabled_extension_names: extension_names.as_ptr(),
-                enabled_extension_count: extension_names.len() as u32,
-            };
+            let extension_names = platforms::required_extension_names();
+
+            let create_info = vk::InstanceCreateInfo::builder()
+                .enabled_layer_names(&layer_names)
+                .application_info(&app_info)
+                .enabled_extension_names(&extension_names);
 
             let instance: ash::Instance = unsafe {
                 entry
@@ -195,6 +175,7 @@ impl VulkanApp {
 
             instance
         };
+
         // 4. Create surface
         let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
         let surface = {
