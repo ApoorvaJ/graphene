@@ -33,11 +33,6 @@ struct Gpu {
     present_queue: vk::Queue,
 }
 
-struct Swapchain {
-    pub handle: vk::SwapchainKHR, // TODO: Inline
-    pub images: Vec<vk::Image>,   // TODO: Make a local var
-}
-
 struct VulkanApp {
     window: winit::window::Window,
     _entry: ash::Entry,
@@ -57,9 +52,10 @@ struct VulkanApp {
     command_pool: vk::CommandPool,
     command_buffer: Vec<vk::CommandBuffer>,
     // - Swapchain
-    swapchain: Swapchain,
+    swapchain: vk::SwapchainKHR,
     _swapchain_format: vk::Format,
     _swapchain_extent: vk::Extent2D,
+    _swapchain_images: Vec<vk::Image>,
     swapchain_imageviews: Vec<vk::ImageView>,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
 
@@ -453,7 +449,7 @@ impl VulkanApp {
 
         // # Create swapchain
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
-        let (swapchain, swapchain_format, swapchain_extent) = {
+        let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
             let mut info = vk::SwapchainCreateInfoKHR::builder().surface(surface);
 
             // Set number of images in swapchain
@@ -535,7 +531,7 @@ impl VulkanApp {
             // Allow Vulkan to discard operations outside of the renderable space
             info = info.clipped(true);
 
-            let handle = unsafe {
+            let swapchain = unsafe {
                 ext_swapchain
                     .create_swapchain(&info, None)
                     .expect("Failed to create Swapchain!")
@@ -543,44 +539,39 @@ impl VulkanApp {
 
             let images = unsafe {
                 ext_swapchain
-                    .get_swapchain_images(handle)
+                    .get_swapchain_images(swapchain)
                     .expect("Failed to get Swapchain Images.")
             };
 
-            (Swapchain { handle, images }, format, extent)
+            (swapchain, format, extent, images)
         };
 
         // 10. Create image views
         let swapchain_imageviews = {
-            let imageviews: Vec<vk::ImageView> = swapchain
-                .images
+            let imageviews: Vec<vk::ImageView> = swapchain_images
                 .iter()
                 .map(|&image| {
-                    let imageview_create_info = vk::ImageViewCreateInfo {
-                        s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-                        p_next: ptr::null(),
-                        flags: vk::ImageViewCreateFlags::empty(),
-                        view_type: vk::ImageViewType::TYPE_2D,
-                        format: swapchain_format,
-                        components: vk::ComponentMapping {
+                    let info = vk::ImageViewCreateInfo::builder()
+                        .image(image)
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(swapchain_format)
+                        .components(vk::ComponentMapping {
                             r: vk::ComponentSwizzle::IDENTITY,
                             g: vk::ComponentSwizzle::IDENTITY,
                             b: vk::ComponentSwizzle::IDENTITY,
                             a: vk::ComponentSwizzle::IDENTITY,
-                        },
-                        subresource_range: vk::ImageSubresourceRange {
+                        })
+                        .subresource_range(vk::ImageSubresourceRange {
                             aspect_mask: vk::ImageAspectFlags::COLOR,
                             base_mip_level: 0,
                             level_count: 1,
                             base_array_layer: 0,
                             layer_count: 1,
-                        },
-                        image,
-                    };
+                        });
 
                     unsafe {
                         gpu.device
-                            .create_image_view(&imageview_create_info, None)
+                            .create_image_view(&info, None)
                             .expect("Failed to create Image View!")
                     }
                 })
@@ -980,6 +971,7 @@ impl VulkanApp {
             swapchain,
             _swapchain_format: swapchain_format,
             _swapchain_extent: swapchain_extent,
+            _swapchain_images: swapchain_images,
             swapchain_imageviews,
             swapchain_framebuffers,
 
@@ -1005,7 +997,7 @@ impl VulkanApp {
 
             self.ext_swapchain
                 .acquire_next_image(
-                    self.swapchain.handle,
+                    self.swapchain,
                     std::u64::MAX,
                     self.image_available_semaphores[self.current_frame],
                     vk::Fence::null(),
@@ -1045,7 +1037,7 @@ impl VulkanApp {
                 .expect("Failed to execute queue submit.");
         }
 
-        let swapchains = [self.swapchain.handle];
+        let swapchains = [self.swapchain];
 
         let present_info = vk::PresentInfoKHR {
             s_type: vk::StructureType::PRESENT_INFO_KHR,
@@ -1105,8 +1097,7 @@ impl Drop for VulkanApp {
                 self.gpu.device.destroy_image_view(imageview, None);
             }
 
-            self.ext_swapchain
-                .destroy_swapchain(self.swapchain.handle, None);
+            self.ext_swapchain.destroy_swapchain(self.swapchain, None);
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
 
