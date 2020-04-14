@@ -16,6 +16,18 @@ use std::ptr;
 // Constants
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
+struct Gpu {
+    physical_device: vk::PhysicalDevice,
+    _exts: Vec<vk::ExtensionProperties>,
+    surface_caps: vk::SurfaceCapabilitiesKHR,
+    surface_formats: Vec<vk::SurfaceFormatKHR>,
+    present_modes: Vec<vk::PresentModeKHR>,
+    _memory_properties: vk::PhysicalDeviceMemoryProperties,
+    _properties: vk::PhysicalDeviceProperties,
+    graphics_queue_idx: u32,
+    present_queue_idx: u32,
+}
+
 struct SyncObjects {
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
@@ -49,7 +61,7 @@ struct VulkanApp {
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
 
-    _physical_device: vk::PhysicalDevice,
+    gpu: Gpu,
     device: ash::Device,
 
     graphics_queue: vk::Queue,
@@ -98,12 +110,6 @@ impl VulkanApp {
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
-
-        struct SwapchainSupport {
-            capabilities: vk::SurfaceCapabilitiesKHR,
-            formats: Vec<vk::SurfaceFormatKHR>,
-            present_modes: Vec<vk::PresentModeKHR>,
-        }
 
         // # Init window
         let window = {
@@ -176,16 +182,7 @@ impl VulkanApp {
             instance
         };
 
-        // 4. Create surface
-        let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
-        let surface = {
-            let handle = unsafe {
-                platforms::create_surface(&entry, &instance, &window)
-                    .expect("Failed to create surface.")
-            };
-            Surface { handle }
-        };
-        // 5. Debug messenger callback
+        // # Debug messenger callback
         let ext_debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
         let debug_messenger = {
             if !ENABLE_DEBUG_MESSENGER_CALLBACK {
@@ -199,29 +196,79 @@ impl VulkanApp {
                 }
             }
         };
-        // 6. Pick physical device and queue family indices
-        let (physical_device, swapchain_support, graphics_queue_idx, present_queue_idx) = {
+
+        // # Create surface
+        let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
+        let surface = {
+            let handle = unsafe {
+                platforms::create_surface(&entry, &instance, &window)
+                    .expect("Failed to create surface.")
+            };
+            Surface { handle }
+        };
+
+        // # Pick a physical device
+        let gpu = {
             let physical_devices = unsafe {
                 &instance
                     .enumerate_physical_devices()
                     .expect("Failed to enumerate Physical Devices!")
             };
-            // Pick the first compatible physical device
-            struct Compat {
-                physical_device: vk::PhysicalDevice,
-                swapchain_support: SwapchainSupport,
-                graphics_queue_idx: u32,
-                present_queue_idx: u32,
-            }
-            let mut opt_compat: Option<Compat> = None;
-            for &physical_device in physical_devices.iter() {
-                let device_features =
-                    unsafe { instance.get_physical_device_features(physical_device) };
 
+            let mut opt_gpu = None;
+
+            for &physical_device in physical_devices {
+                let exts = unsafe {
+                    instance
+                        .enumerate_device_extension_properties(physical_device)
+                        .expect("Failed to get device extension properties.")
+                };
+                // Are desired extensions supported?
+                let are_exts_supported = {
+                    let available_exts: Vec<String> = exts
+                        .iter()
+                        .map(|&ext| tools::vk_to_string(&ext.extension_name))
+                        .collect();
+
+                    device_extensions.iter().all(|required_ext| {
+                        available_exts
+                            .iter()
+                            .any(|available_ext| required_ext == available_ext)
+                    })
+                };
+                if !are_exts_supported {
+                    continue;
+                }
+
+                let surface_caps = unsafe {
+                    ext_surface
+                        .get_physical_device_surface_capabilities(physical_device, surface.handle)
+                        .expect("Failed to query for surface capabilities.")
+                };
+
+                let surface_formats = unsafe {
+                    ext_surface
+                        .get_physical_device_surface_formats(physical_device, surface.handle)
+                        .expect("Failed to query for surface formats.")
+                };
+                let present_modes = unsafe {
+                    ext_surface
+                        .get_physical_device_surface_present_modes(physical_device, surface.handle)
+                        .expect("Failed to query for surface present mode.")
+                };
+                // Are there any surface formats and present modes?
+                if surface_formats.is_empty() || present_modes.is_empty() {
+                    continue;
+                }
+
+                let _memory_properties =
+                    unsafe { instance.get_physical_device_memory_properties(physical_device) };
+                let _properties =
+                    unsafe { instance.get_physical_device_properties(physical_device) };
+                // Queue family indices
                 let queue_families = unsafe {
                     instance.get_physical_device_queue_family_properties(physical_device)
                 };
-
                 let opt_graphics_queue_idx = queue_families.iter().position(|&fam| {
                     fam.queue_count > 0 && fam.queue_flags.contains(vk::QueueFlags::GRAPHICS)
                 });
@@ -237,92 +284,33 @@ impl VulkanApp {
                         fam.queue_count > 0 && is_present_supported
                     });
 
-                let is_device_extension_supported = {
-                    // Query available extensions
-                    let props = unsafe {
-                        instance
-                            .enumerate_device_extension_properties(physical_device)
-                            .expect("Failed to get device extension properties.")
-                    };
-                    let available_exts: Vec<String> = props
-                        .iter()
-                        .map(|&ext| tools::vk_to_string(&ext.extension_name))
-                        .collect();
-
-                    device_extensions.iter().all(|required_ext| {
-                        available_exts
-                            .iter()
-                            .any(|available_ext| required_ext == available_ext)
-                    })
-                };
-
-                let opt_swapchain_support = if is_device_extension_supported {
-                    unsafe {
-                        let capabilities = ext_surface
-                            .get_physical_device_surface_capabilities(
-                                physical_device,
-                                surface.handle,
-                            )
-                            .expect("Failed to query for surface capabilities.");
-                        let formats = ext_surface
-                            .get_physical_device_surface_formats(physical_device, surface.handle)
-                            .expect("Failed to query for surface formats.");
-                        let present_modes = ext_surface
-                            .get_physical_device_surface_present_modes(
-                                physical_device,
-                                surface.handle,
-                            )
-                            .expect("Failed to query for surface present mode.");
-
-                        Some(SwapchainSupport {
-                            capabilities,
-                            formats,
+                if let Some(graphics_queue_idx) = opt_graphics_queue_idx {
+                    if let Some(present_queue_idx) = opt_present_queue_idx {
+                        opt_gpu = Some(Gpu {
+                            physical_device,
+                            _exts: exts,
+                            surface_caps,
+                            surface_formats,
                             present_modes,
-                        })
-                    }
-                } else {
-                    None
-                };
-                let is_support_sampler_anisotropy = device_features.sampler_anisotropy == 1;
-
-                if is_device_extension_supported && is_support_sampler_anisotropy {
-                    if let Some(swapchain_support) = opt_swapchain_support {
-                        if !swapchain_support.formats.is_empty()
-                            && !swapchain_support.present_modes.is_empty()
-                        {
-                            if let Some(graphics_queue_idx) = opt_graphics_queue_idx {
-                                if let Some(present_queue_idx) = opt_present_queue_idx {
-                                    // Compatible physical device found
-                                    opt_compat = Some(Compat {
-                                        physical_device,
-                                        swapchain_support,
-                                        graphics_queue_idx: graphics_queue_idx as u32,
-                                        present_queue_idx: present_queue_idx as u32,
-                                    });
-                                    break;
-                                }
-                            }
-                        }
+                            _memory_properties,
+                            _properties,
+                            graphics_queue_idx: graphics_queue_idx as u32,
+                            present_queue_idx: present_queue_idx as u32,
+                        });
                     }
                 }
             }
 
-            match opt_compat {
-                Some(compat) => (
-                    compat.physical_device,
-                    compat.swapchain_support,
-                    compat.graphics_queue_idx,
-                    compat.present_queue_idx,
-                ),
-                None => panic!("Failed to find a suitable GPU!"),
-            }
+            opt_gpu.expect("Failed to find a suitable GPU.")
         };
-        // 7. Create logical device and queues
-        let (device, graphics_queue, present_queue) = {
+
+        // # Create logical device
+        // TODO: Create a member logical_device in the Gpu struct
+        let device = {
             use std::collections::HashSet;
             let mut unique_queue_families = HashSet::new();
-            unique_queue_families.insert(graphics_queue_idx);
-            unique_queue_families.insert(present_queue_idx);
+            unique_queue_families.insert(gpu.graphics_queue_idx);
+            unique_queue_families.insert(gpu.present_queue_idx);
 
             let queue_priorities = [1.0_f32];
             let mut queue_create_infos = vec![];
@@ -365,14 +353,11 @@ impl VulkanApp {
 
             let device: ash::Device = unsafe {
                 instance
-                    .create_device(physical_device, &device_create_info, None)
+                    .create_device(gpu.physical_device, &device_create_info, None)
                     .expect("Failed to create logical Device!")
             };
 
-            let graphics_queue = unsafe { device.get_device_queue(graphics_queue_idx, 0) };
-            let present_queue = unsafe { device.get_device_queue(present_queue_idx, 0) };
-
-            (device, graphics_queue, present_queue)
+            device
         };
 
         // 8. Create command pool
@@ -381,7 +366,7 @@ impl VulkanApp {
                 s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
                 p_next: ptr::null(),
                 flags: vk::CommandPoolCreateFlags::empty(),
-                queue_family_index: graphics_queue_idx,
+                queue_family_index: gpu.graphics_queue_idx,
             };
 
             unsafe {
@@ -395,52 +380,49 @@ impl VulkanApp {
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &device);
         let swapchain = {
             let surface_format: vk::SurfaceFormatKHR = {
-                *swapchain_support
-                    .formats
+                *gpu.surface_formats
                     .iter()
                     .find(|&f| {
                         f.format == vk::Format::B8G8R8A8_SRGB
                             && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
                     })
-                    .unwrap_or(&swapchain_support.formats[0])
+                    .unwrap_or(&gpu.surface_formats[0])
             };
             let present_mode: vk::PresentModeKHR = {
-                *swapchain_support
-                    .present_modes
+                *gpu.present_modes
                     .iter()
                     .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
                     .unwrap_or(&vk::PresentModeKHR::FIFO)
             };
             let extent = {
-                let caps = &swapchain_support.capabilities;
-                if caps.current_extent.width != u32::max_value() {
-                    caps.current_extent
+                if gpu.surface_caps.current_extent.width != u32::max_value() {
+                    gpu.surface_caps.current_extent
                 } else {
                     let window_size = window.inner_size();
                     vk::Extent2D {
                         width: (window_size.width as u32)
-                            .max(caps.min_image_extent.width)
-                            .min(caps.max_image_extent.width),
+                            .max(gpu.surface_caps.min_image_extent.width)
+                            .min(gpu.surface_caps.max_image_extent.width),
                         height: (window_size.height as u32)
-                            .max(caps.min_image_extent.height)
-                            .min(caps.max_image_extent.height),
+                            .max(gpu.surface_caps.min_image_extent.height)
+                            .min(gpu.surface_caps.max_image_extent.height),
                     }
                 }
             };
 
-            let image_count = swapchain_support.capabilities.min_image_count + 1;
-            let image_count = if swapchain_support.capabilities.max_image_count > 0 {
-                image_count.min(swapchain_support.capabilities.max_image_count)
+            let image_count = gpu.surface_caps.min_image_count + 1;
+            let image_count = if gpu.surface_caps.max_image_count > 0 {
+                image_count.min(gpu.surface_caps.max_image_count)
             } else {
                 image_count
             };
 
             let (image_sharing_mode, queue_family_index_count, queue_family_indices) =
-                if graphics_queue_idx != present_queue_idx {
+                if gpu.graphics_queue_idx != gpu.present_queue_idx {
                     (
                         vk::SharingMode::CONCURRENT,
                         2,
-                        vec![graphics_queue_idx, present_queue_idx],
+                        vec![gpu.graphics_queue_idx, gpu.present_queue_idx],
                     )
                 } else {
                     (vk::SharingMode::EXCLUSIVE, 0, vec![])
@@ -459,7 +441,7 @@ impl VulkanApp {
                 image_sharing_mode,
                 p_queue_family_indices: queue_family_indices.as_ptr(),
                 queue_family_index_count,
-                pre_transform: swapchain_support.capabilities.current_transform,
+                pre_transform: gpu.surface_caps.current_transform,
                 composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
                 present_mode,
                 clipped: vk::TRUE,
@@ -939,6 +921,10 @@ impl VulkanApp {
             sync_objects
         };
 
+        //TODO: Remove these members from the VulkanApp struct and inline them into the Gpu struct
+        let graphics_queue = unsafe { device.get_device_queue(gpu.graphics_queue_idx, 0) };
+        let present_queue = unsafe { device.get_device_queue(gpu.present_queue_idx, 0) };
+
         VulkanApp {
             window,
             // Vulkan
@@ -954,7 +940,7 @@ impl VulkanApp {
             debug_messenger,
             validation_layers,
 
-            _physical_device: physical_device,
+            gpu,
             device,
 
             graphics_queue,
