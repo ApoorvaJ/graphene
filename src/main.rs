@@ -14,7 +14,7 @@ use std::os::raw::c_char;
 use std::ptr;
 
 // Constants
-const MAX_FRAMES_IN_FLIGHT: usize = 2;
+const NUM_FRAMES_IN_FLIGHT: usize = 2;
 
 struct Gpu {
     // Physical device
@@ -31,52 +31,44 @@ struct Gpu {
     device: ash::Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
-    command_pool: vk::CommandPool,
-    // Synchronization primitives
-    image_available_semaphores: Vec<vk::Semaphore>,
-    render_finished_semaphores: Vec<vk::Semaphore>,
-    command_buffer_complete_fences: Vec<vk::Fence>,
-}
-
-struct Surface {
-    handle: vk::SurfaceKHR,
 }
 
 struct Swapchain {
-    pub handle: vk::SwapchainKHR,
-    pub format: vk::Format,
-    pub extent: vk::Extent2D,
-    pub images: Vec<vk::Image>,
+    pub handle: vk::SwapchainKHR, // TODO: Inline
+    pub images: Vec<vk::Image>,   // TODO: Make a local var
 }
 
 struct VulkanApp {
     window: winit::window::Window,
-
-    // Vulkan
     _entry: ash::Entry,
     instance: ash::Instance,
+    surface: vk::SurfaceKHR,
     // - Extensions
     ext_debug_utils: ash::extensions::ext::DebugUtils,
     ext_surface: ash::extensions::khr::Surface,
     ext_swapchain: ash::extensions::khr::Swapchain,
-
+    // - Device
     gpu: Gpu,
-
-    surface: Surface,
-
-    debug_messenger: vk::DebugUtilsMessengerEXT,
-    validation_layers: Vec<String>,
-
+    // - Synchronization primitives
+    image_available_semaphores: Vec<vk::Semaphore>,
+    render_finished_semaphores: Vec<vk::Semaphore>,
+    command_buffer_complete_fences: Vec<vk::Fence>,
+    // - Commands
+    command_pool: vk::CommandPool,
+    command_buffer: Vec<vk::CommandBuffer>,
+    // - Swapchain
     swapchain: Swapchain,
+    _swapchain_format: vk::Format,
+    _swapchain_extent: vk::Extent2D,
     swapchain_imageviews: Vec<vk::ImageView>,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
 
+    debug_messenger: vk::DebugUtilsMessengerEXT,
+    validation_layers: Vec<String>,
     render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
-
-    command_buffers: Vec<vk::CommandBuffer>,
-
+    command_buffers_2: Vec<vk::CommandBuffer>, // TODO: Delete
     current_frame: usize,
 }
 
@@ -195,12 +187,9 @@ impl VulkanApp {
 
         // # Create surface
         let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
-        let surface = {
-            let handle = unsafe {
-                platforms::create_surface(&entry, &instance, &window)
-                    .expect("Failed to create surface.")
-            };
-            Surface { handle }
+        let surface = unsafe {
+            platforms::create_surface(&entry, &instance, &window)
+                .expect("Failed to create surface.")
         };
 
         // # Enumerate eligible GPUs
@@ -249,18 +238,18 @@ impl VulkanApp {
 
                 let surface_caps = unsafe {
                     ext_surface
-                        .get_physical_device_surface_capabilities(physical_device, surface.handle)
+                        .get_physical_device_surface_capabilities(physical_device, surface)
                         .expect("Failed to query for surface capabilities.")
                 };
 
                 let surface_formats = unsafe {
                     ext_surface
-                        .get_physical_device_surface_formats(physical_device, surface.handle)
+                        .get_physical_device_surface_formats(physical_device, surface)
                         .expect("Failed to query for surface formats.")
                 };
                 let present_modes = unsafe {
                     ext_surface
-                        .get_physical_device_surface_present_modes(physical_device, surface.handle)
+                        .get_physical_device_surface_present_modes(physical_device, surface)
                         .expect("Failed to query for surface present mode.")
                 };
                 // Are there any surface formats and present modes?
@@ -286,7 +275,7 @@ impl VulkanApp {
                             ext_surface.get_physical_device_surface_support(
                                 physical_device,
                                 i as u32,
-                                surface.handle,
+                                surface,
                             )
                         };
                         fam.queue_count > 0 && is_present_supported
@@ -378,56 +367,6 @@ impl VulkanApp {
             let graphics_queue = unsafe { device.get_device_queue(cgpu.graphics_queue_idx, 0) };
             let present_queue = unsafe { device.get_device_queue(cgpu.present_queue_idx, 0) };
 
-            let command_pool = {
-                let command_pool_create_info = vk::CommandPoolCreateInfo::builder()
-                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                    .queue_family_index(cgpu.graphics_queue_idx);
-
-                unsafe {
-                    device
-                        .create_command_pool(&command_pool_create_info, None)
-                        .expect("Failed to create Command Pool!")
-                }
-            };
-
-            let (
-                image_available_semaphores,
-                render_finished_semaphores,
-                command_buffer_complete_fences,
-            ) = {
-                let mut image_available_semaphores = Vec::new();
-                let mut render_finished_semaphores = Vec::new();
-                let mut command_buffer_complete_fences = Vec::new();
-                let semaphore_create_info = vk::SemaphoreCreateInfo::builder();
-                let fence_create_info =
-                    vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
-
-                for _ in 0..MAX_FRAMES_IN_FLIGHT {
-                    unsafe {
-                        image_available_semaphores.push(
-                            device
-                                .create_semaphore(&semaphore_create_info, None)
-                                .expect("Failed to create Semaphore Object!"),
-                        );
-                        render_finished_semaphores.push(
-                            device
-                                .create_semaphore(&semaphore_create_info, None)
-                                .expect("Failed to create Semaphore Object!"),
-                        );
-                        command_buffer_complete_fences.push(
-                            device
-                                .create_fence(&fence_create_info, None)
-                                .expect("Failed to create Fence Object!"),
-                        );
-                    }
-                }
-                (
-                    image_available_semaphores,
-                    render_finished_semaphores,
-                    command_buffer_complete_fences,
-                )
-            };
-
             Gpu {
                 // Physical device
                 _physical_device: cgpu.physical_device,
@@ -443,36 +382,108 @@ impl VulkanApp {
                 device,
                 graphics_queue,
                 present_queue,
-                command_pool,
-                // Synchronization primitives
-                image_available_semaphores,
-                render_finished_semaphores,
-                command_buffer_complete_fences,
             }
         };
 
-        // 9. Create swapchain
+        // # Synchronization primitives
+        let (
+            image_available_semaphores,
+            render_finished_semaphores,
+            command_buffer_complete_fences,
+        ) = {
+            let mut image_available_semaphores = Vec::new();
+            let mut render_finished_semaphores = Vec::new();
+            let mut command_buffer_complete_fences = Vec::new();
+            let semaphore_create_info = vk::SemaphoreCreateInfo::builder();
+            let fence_create_info =
+                vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
+
+            for _ in 0..NUM_FRAMES_IN_FLIGHT {
+                unsafe {
+                    image_available_semaphores.push(
+                        gpu.device
+                            .create_semaphore(&semaphore_create_info, None)
+                            .expect("Failed to create Semaphore Object!"),
+                    );
+                    render_finished_semaphores.push(
+                        gpu.device
+                            .create_semaphore(&semaphore_create_info, None)
+                            .expect("Failed to create Semaphore Object!"),
+                    );
+                    command_buffer_complete_fences.push(
+                        gpu.device
+                            .create_fence(&fence_create_info, None)
+                            .expect("Failed to create Fence Object!"),
+                    );
+                }
+            }
+            (
+                image_available_semaphores,
+                render_finished_semaphores,
+                command_buffer_complete_fences,
+            )
+        };
+
+        // # Create command pool
+        let command_pool = {
+            let info = vk::CommandPoolCreateInfo::builder()
+                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                .queue_family_index(gpu.graphics_queue_idx);
+
+            unsafe {
+                gpu.device
+                    .create_command_pool(&info, None)
+                    .expect("Failed to create command pool")
+            }
+        };
+
+        // # Allocate command buffer
+        let command_buffer = {
+            let info = vk::CommandBufferAllocateInfo::builder()
+                .command_pool(command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(NUM_FRAMES_IN_FLIGHT as u32);
+
+            unsafe {
+                gpu.device
+                    .allocate_command_buffers(&info)
+                    .expect("Failed to allocate command buffer")
+            }
+        };
+
+        // # Create swapchain
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
-        let swapchain = {
-            let surface_format: vk::SurfaceFormatKHR = {
-                *gpu.surface_formats
-                    .iter()
-                    .find(|&f| {
-                        f.format == vk::Format::B8G8R8A8_SRGB
-                            && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-                    })
-                    .unwrap_or(&gpu.surface_formats[0])
+        let (swapchain, swapchain_format, swapchain_extent) = {
+            let mut info = vk::SwapchainCreateInfoKHR::builder().surface(surface);
+
+            // Set number of images in swapchain
+            {
+                let image_count = gpu
+                    .surface_caps
+                    .min_image_count
+                    .max(NUM_FRAMES_IN_FLIGHT as u32);
+                info = info.min_image_count(image_count);
+            }
+            // Choose surface format
+            let format = {
+                let surface_format: vk::SurfaceFormatKHR = {
+                    *gpu.surface_formats
+                        .iter()
+                        .find(|&f| {
+                            f.format == vk::Format::B8G8R8A8_SRGB
+                                && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                        })
+                        .unwrap_or(&gpu.surface_formats[0])
+                };
+                info = info
+                    .image_format(surface_format.format)
+                    .image_color_space(surface_format.color_space);
+
+                surface_format.format
             };
-            let present_mode: vk::PresentModeKHR = {
-                *gpu.present_modes
-                    .iter()
-                    .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
-                    .unwrap_or(&vk::PresentModeKHR::FIFO)
-            };
+            // Choose extent
             let extent = {
-                if gpu.surface_caps.current_extent.width != u32::max_value() {
-                    gpu.surface_caps.current_extent
-                } else {
+                if gpu.surface_caps.current_extent.width == u32::max_value() {
                     let window_size = window.inner_size();
                     vk::Extent2D {
                         width: (window_size.width as u32)
@@ -482,51 +493,51 @@ impl VulkanApp {
                             .max(gpu.surface_caps.min_image_extent.height)
                             .min(gpu.surface_caps.max_image_extent.height),
                     }
+                } else {
+                    gpu.surface_caps.current_extent
                 }
             };
+            info = info.image_extent(extent);
 
-            let image_count = gpu.surface_caps.min_image_count + 1;
-            let image_count = if gpu.surface_caps.max_image_count > 0 {
-                image_count.min(gpu.surface_caps.max_image_count)
+            info = info.image_array_layers(1).image_usage(
+                vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+            );
+
+            // Sharing mode
+            let indices = [gpu.graphics_queue_idx, gpu.present_queue_idx];
+            if gpu.graphics_queue_idx != gpu.present_queue_idx {
+                info = info
+                    .image_sharing_mode(vk::SharingMode::CONCURRENT)
+                    .queue_family_indices(&indices);
             } else {
-                image_count
-            };
+                // Graphics and present are the same queue, so it can have
+                // exclusive access to the swapchain
+                info = info.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
+            }
 
-            let (image_sharing_mode, queue_family_index_count, queue_family_indices) =
-                if gpu.graphics_queue_idx != gpu.present_queue_idx {
-                    (
-                        vk::SharingMode::CONCURRENT,
-                        2,
-                        vec![gpu.graphics_queue_idx, gpu.present_queue_idx],
-                    )
-                } else {
-                    (vk::SharingMode::EXCLUSIVE, 0, vec![])
+            // TODO: Investigate:
+            // The vulkan tutorial sets this as `pre_transform(gpu.surface_caps.current_transform)`.
+            info = info
+                .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
+                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE);
+
+            // Present mode
+            {
+                let present_mode: vk::PresentModeKHR = {
+                    *gpu.present_modes
+                        .iter()
+                        .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
+                        .unwrap_or(&vk::PresentModeKHR::FIFO)
                 };
+                info = info.present_mode(present_mode);
+            }
 
-            let swapchain_create_info = vk::SwapchainCreateInfoKHR {
-                s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
-                p_next: ptr::null(),
-                flags: vk::SwapchainCreateFlagsKHR::empty(),
-                surface: surface.handle,
-                min_image_count: image_count,
-                image_color_space: surface_format.color_space,
-                image_format: surface_format.format,
-                image_extent: extent,
-                image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                image_sharing_mode,
-                p_queue_family_indices: queue_family_indices.as_ptr(),
-                queue_family_index_count,
-                pre_transform: gpu.surface_caps.current_transform,
-                composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
-                present_mode,
-                clipped: vk::TRUE,
-                old_swapchain: vk::SwapchainKHR::null(),
-                image_array_layers: 1,
-            };
+            // Allow Vulkan to discard operations outside of the renderable space
+            info = info.clipped(true);
 
             let handle = unsafe {
                 ext_swapchain
-                    .create_swapchain(&swapchain_create_info, None)
+                    .create_swapchain(&info, None)
                     .expect("Failed to create Swapchain!")
             };
 
@@ -536,13 +547,9 @@ impl VulkanApp {
                     .expect("Failed to get Swapchain Images.")
             };
 
-            Swapchain {
-                handle,
-                format: surface_format.format,
-                extent,
-                images,
-            }
+            (Swapchain { handle, images }, format, extent)
         };
+
         // 10. Create image views
         let swapchain_imageviews = {
             let imageviews: Vec<vk::ImageView> = swapchain
@@ -554,7 +561,7 @@ impl VulkanApp {
                         p_next: ptr::null(),
                         flags: vk::ImageViewCreateFlags::empty(),
                         view_type: vk::ImageViewType::TYPE_2D,
-                        format: swapchain.format,
+                        format: swapchain_format,
                         components: vk::ComponentMapping {
                             r: vk::ComponentSwizzle::IDENTITY,
                             g: vk::ComponentSwizzle::IDENTITY,
@@ -584,7 +591,7 @@ impl VulkanApp {
         // 11. Create render pass
         let render_pass = {
             let color_attachment = vk::AttachmentDescription {
-                format: swapchain.format,
+                format: swapchain_format,
                 flags: vk::AttachmentDescriptionFlags::empty(),
                 samples: vk::SampleCountFlags::TYPE_1,
                 load_op: vk::AttachmentLoadOp::CLEAR,
@@ -699,15 +706,15 @@ impl VulkanApp {
             let viewports = [vk::Viewport {
                 x: 0.0,
                 y: 0.0,
-                width: swapchain.extent.width as f32,
-                height: swapchain.extent.height as f32,
+                width: swapchain_extent.width as f32,
+                height: swapchain_extent.height as f32,
                 min_depth: 0.0,
                 max_depth: 1.0,
             }];
 
             let scissors = [vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: swapchain.extent,
+                extent: swapchain_extent,
             }];
 
             let viewport_state_create_info = vk::PipelineViewportStateCreateInfo {
@@ -864,8 +871,8 @@ impl VulkanApp {
                         render_pass,
                         attachment_count: attachments.len() as u32,
                         p_attachments: attachments.as_ptr(),
-                        width: swapchain.extent.width,
-                        height: swapchain.extent.height,
+                        width: swapchain_extent.width,
+                        height: swapchain_extent.height,
                         layers: 1,
                     };
 
@@ -879,22 +886,22 @@ impl VulkanApp {
         };
 
         // 14. Create command buffers
-        let command_buffers = {
+        let command_buffers_2 = {
             let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
                 s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: ptr::null(),
                 command_buffer_count: swapchain_framebuffers.len() as u32,
-                command_pool: gpu.command_pool,
+                command_pool: command_pool,
                 level: vk::CommandBufferLevel::PRIMARY,
             };
 
-            let command_buffers = unsafe {
+            let command_buffers_2 = unsafe {
                 gpu.device
                     .allocate_command_buffers(&command_buffer_allocate_info)
                     .expect("Failed to allocate Command Buffers!")
             };
 
-            for (i, &command_buffer) in command_buffers.iter().enumerate() {
+            for (i, &command_buffer) in command_buffers_2.iter().enumerate() {
                 let command_buffer_begin_info = vk::CommandBufferBeginInfo {
                     s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
                     p_next: ptr::null(),
@@ -921,7 +928,7 @@ impl VulkanApp {
                     framebuffer: swapchain_framebuffers[i],
                     render_area: vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: swapchain.extent,
+                        extent: swapchain_extent,
                     },
                     clear_value_count: clear_values.len() as u32,
                     p_clear_values: clear_values.as_ptr(),
@@ -948,42 +955,47 @@ impl VulkanApp {
                 }
             }
 
-            command_buffers
+            command_buffers_2
         };
 
         VulkanApp {
             window,
-            // Vulkan
             _entry: entry,
             instance,
+            surface,
             // - Extensions
             ext_debug_utils,
             ext_surface,
             ext_swapchain,
-
+            // - Device
             gpu,
-
-            surface,
-
-            debug_messenger,
-            validation_layers,
-
+            // - Synchronization primitives
+            image_available_semaphores,
+            render_finished_semaphores,
+            command_buffer_complete_fences,
+            // - Commands
+            command_pool,
+            command_buffer,
+            // - Swapchain
             swapchain,
+            _swapchain_format: swapchain_format,
+            _swapchain_extent: swapchain_extent,
             swapchain_imageviews,
             swapchain_framebuffers,
 
+            debug_messenger,
+            validation_layers,
             pipeline_layout,
             render_pass,
             graphics_pipeline,
-
-            command_buffers,
+            command_buffers_2,
 
             current_frame: 0,
         }
     }
 
     fn draw_frame(&mut self) {
-        let wait_fences = [self.gpu.command_buffer_complete_fences[self.current_frame]];
+        let wait_fences = [self.command_buffer_complete_fences[self.current_frame]];
 
         let (image_index, _is_sub_optimal) = unsafe {
             self.gpu
@@ -995,15 +1007,15 @@ impl VulkanApp {
                 .acquire_next_image(
                     self.swapchain.handle,
                     std::u64::MAX,
-                    self.gpu.image_available_semaphores[self.current_frame],
+                    self.image_available_semaphores[self.current_frame],
                     vk::Fence::null(),
                 )
                 .expect("Failed to acquire next image.")
         };
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let wait_semaphores = [self.gpu.image_available_semaphores[self.current_frame]];
-        let signal_semaphores = [self.gpu.render_finished_semaphores[self.current_frame]];
+        let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
+        let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
 
         let submit_infos = [vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
@@ -1012,7 +1024,7 @@ impl VulkanApp {
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
             command_buffer_count: 1,
-            p_command_buffers: &self.command_buffers[image_index as usize],
+            p_command_buffers: &self.command_buffers_2[image_index as usize],
             signal_semaphore_count: signal_semaphores.len() as u32,
             p_signal_semaphores: signal_semaphores.as_ptr(),
         }];
@@ -1028,7 +1040,7 @@ impl VulkanApp {
                 .queue_submit(
                     self.gpu.graphics_queue,
                     &submit_infos,
-                    self.gpu.command_buffer_complete_fences[self.current_frame],
+                    self.command_buffer_complete_fences[self.current_frame],
                 )
                 .expect("Failed to execute queue submit.");
         }
@@ -1052,7 +1064,7 @@ impl VulkanApp {
                 .expect("Failed to execute queue present.");
         }
 
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        self.current_frame = (self.current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
     }
 }
 
@@ -1061,21 +1073,21 @@ impl Drop for VulkanApp {
         unsafe {
             // TODO: Move these into their own sub-object drop traits.
             // e.g. the gpu can have its own drop() trait
-            for i in 0..MAX_FRAMES_IN_FLIGHT {
+            for i in 0..NUM_FRAMES_IN_FLIGHT {
                 self.gpu
                     .device
-                    .destroy_semaphore(self.gpu.image_available_semaphores[i], None);
+                    .destroy_semaphore(self.image_available_semaphores[i], None);
                 self.gpu
                     .device
-                    .destroy_semaphore(self.gpu.render_finished_semaphores[i], None);
+                    .destroy_semaphore(self.render_finished_semaphores[i], None);
                 self.gpu
                     .device
-                    .destroy_fence(self.gpu.command_buffer_complete_fences[i], None);
+                    .destroy_fence(self.command_buffer_complete_fences[i], None);
             }
 
             self.gpu
                 .device
-                .destroy_command_pool(self.gpu.command_pool, None);
+                .destroy_command_pool(self.command_pool, None);
 
             for &framebuffer in self.swapchain_framebuffers.iter() {
                 self.gpu.device.destroy_framebuffer(framebuffer, None);
@@ -1096,7 +1108,7 @@ impl Drop for VulkanApp {
             self.ext_swapchain
                 .destroy_swapchain(self.swapchain.handle, None);
             self.gpu.device.destroy_device(None);
-            self.ext_surface.destroy_surface(self.surface.handle, None);
+            self.ext_surface.destroy_surface(self.surface, None);
 
             if !self.validation_layers.is_empty() {
                 self.ext_debug_utils
