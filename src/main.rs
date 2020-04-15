@@ -57,11 +57,12 @@ struct VulkanApp {
     _swapchain_extent: vk::Extent2D,
     _swapchain_images: Vec<vk::Image>,
     swapchain_imageviews: Vec<vk::ImageView>,
-    swapchain_framebuffers: Vec<vk::Framebuffer>,
+    // TODO: Depth image
+    render_pass: vk::RenderPass,
+    framebuffers: Vec<vk::Framebuffer>,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
-    render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
     command_buffers_2: Vec<vk::CommandBuffer>, // TODO: Delete
@@ -450,18 +451,14 @@ impl VulkanApp {
         // # Create swapchain
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
         let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
-            let mut info = vk::SwapchainCreateInfoKHR::builder().surface(surface);
-
             // Set number of images in swapchain
-            {
-                let image_count = gpu
-                    .surface_caps
-                    .min_image_count
-                    .max(NUM_FRAMES_IN_FLIGHT as u32);
-                info = info.min_image_count(image_count);
-            }
-            // Choose surface format
-            let format = {
+            let image_count = gpu
+                .surface_caps
+                .min_image_count
+                .max(NUM_FRAMES_IN_FLIGHT as u32);
+
+            // Choose swapchain format (i.e. color buffer format)
+            let (swapchain_format, swapchain_color_space) = {
                 let surface_format: vk::SurfaceFormatKHR = {
                     *gpu.surface_formats
                         .iter()
@@ -471,12 +468,9 @@ impl VulkanApp {
                         })
                         .unwrap_or(&gpu.surface_formats[0])
                 };
-                info = info
-                    .image_format(surface_format.format)
-                    .image_color_space(surface_format.color_space);
-
-                surface_format.format
+                (surface_format.format, surface_format.color_space)
             };
+
             // Choose extent
             let extent = {
                 if gpu.surface_caps.current_extent.width == u32::max_value() {
@@ -493,11 +487,31 @@ impl VulkanApp {
                     gpu.surface_caps.current_extent
                 }
             };
-            info = info.image_extent(extent);
 
-            info = info.image_array_layers(1).image_usage(
-                vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
-            );
+            // Present mode
+            let present_mode: vk::PresentModeKHR = {
+                *gpu.present_modes
+                    .iter()
+                    .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
+                    .unwrap_or(&vk::PresentModeKHR::FIFO)
+            };
+
+            let mut info = vk::SwapchainCreateInfoKHR::builder()
+                .surface(surface)
+                .min_image_count(image_count)
+                .image_format(swapchain_format)
+                .image_color_space(swapchain_color_space)
+                .image_extent(extent)
+                .image_array_layers(1)
+                .image_usage(
+                    vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+                )
+                // TODO: Investigate:
+                // The vulkan tutorial sets this as `pre_transform(gpu.surface_caps.current_transform)`.
+                .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
+                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+                .present_mode(present_mode)
+                .clipped(true); // Allow Vulkan to discard operations outside of the renderable space
 
             // Sharing mode
             let indices = [gpu.graphics_queue_idx, gpu.present_queue_idx];
@@ -511,26 +525,6 @@ impl VulkanApp {
                 info = info.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
             }
 
-            // TODO: Investigate:
-            // The vulkan tutorial sets this as `pre_transform(gpu.surface_caps.current_transform)`.
-            info = info
-                .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
-                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE);
-
-            // Present mode
-            {
-                let present_mode: vk::PresentModeKHR = {
-                    *gpu.present_modes
-                        .iter()
-                        .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
-                        .unwrap_or(&vk::PresentModeKHR::FIFO)
-                };
-                info = info.present_mode(present_mode);
-            }
-
-            // Allow Vulkan to discard operations outside of the renderable space
-            info = info.clipped(true);
-
             let swapchain = unsafe {
                 ext_swapchain
                     .create_swapchain(&info, None)
@@ -543,10 +537,10 @@ impl VulkanApp {
                     .expect("Failed to get Swapchain Images.")
             };
 
-            (swapchain, format, extent, images)
+            (swapchain, swapchain_format, extent, images)
         };
 
-        // 10. Create image views
+        // # Create swapchain image views
         let swapchain_imageviews = {
             let imageviews: Vec<vk::ImageView> = swapchain_images
                 .iter()
@@ -579,61 +573,58 @@ impl VulkanApp {
 
             imageviews
         };
-        // 11. Create render pass
-        let render_pass = {
-            let color_attachment = vk::AttachmentDescription {
-                format: swapchain_format,
-                flags: vk::AttachmentDescriptionFlags::empty(),
-                samples: vk::SampleCountFlags::TYPE_1,
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::STORE,
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-            };
 
-            let color_attachment_ref = vk::AttachmentReference {
+        // # Create render pass
+        let render_pass = {
+            let attachments = vec![
+                // Color attachment
+                vk::AttachmentDescription {
+                    format: swapchain_format,
+                    flags: vk::AttachmentDescriptionFlags::empty(),
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    load_op: vk::AttachmentLoadOp::CLEAR, // TODO: DONT_CARE?
+                    store_op: vk::AttachmentStoreOp::STORE,
+                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                },
+                // TODO: Depth attachment
+                // vk::AttachmentDescription {
+                //     format: depth_format, // TODO: Choose this format
+                //     flags: vk::AttachmentDescriptionFlags::empty(),
+                //     samples: vk::SampleCountFlags::TYPE_1,
+                //     load_op: vk::AttachmentLoadOp::DONT_CARE,
+                //     store_op: vk::AttachmentStoreOp::DONT_CARE,
+                //     stencil_load_op: vk::AttachmentLoadOp::LOAD, // ?
+                //     stencil_store_op: vk::AttachmentStoreOp::STORE, // ?
+                //     initial_layout: vk::ImageLayout::UNDEFINED,
+                //     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                // },
+            ];
+
+            let color_attachment_ref = [vk::AttachmentReference {
                 attachment: 0,
                 layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            };
-
-            let subpasses = [vk::SubpassDescription {
-                color_attachment_count: 1,
-                p_color_attachments: &color_attachment_ref,
-                p_depth_stencil_attachment: ptr::null(),
-                flags: vk::SubpassDescriptionFlags::empty(),
-                pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
-                input_attachment_count: 0,
-                p_input_attachments: ptr::null(),
-                p_resolve_attachments: ptr::null(),
-                preserve_attachment_count: 0,
-                p_preserve_attachments: ptr::null(),
             }];
+            // TODO: Depth attachment ref
+            // let depth_attachment_ref = vk::AttachmentReference {
+            //     attachment: 1,
+            //     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            // };
 
-            let render_pass_attachments = [color_attachment];
+            let subpasses = [vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&color_attachment_ref)
+                // .depth_stencil_attachment(&depth_attachment_ref)
+                .build()];
 
-            let subpass_dependencies = [vk::SubpassDependency {
-                src_subpass: vk::SUBPASS_EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: vk::AccessFlags::empty(),
-                dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dependency_flags: vk::DependencyFlags::empty(),
-            }];
+            // TODO: Subpass dependencies
 
-            let renderpass_create_info = vk::RenderPassCreateInfo {
-                s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
-                flags: vk::RenderPassCreateFlags::empty(),
-                p_next: ptr::null(),
-                attachment_count: render_pass_attachments.len() as u32,
-                p_attachments: render_pass_attachments.as_ptr(),
-                subpass_count: subpasses.len() as u32,
-                p_subpasses: subpasses.as_ptr(),
-                dependency_count: subpass_dependencies.len() as u32,
-                p_dependencies: subpass_dependencies.as_ptr(),
-            };
+            let renderpass_create_info = vk::RenderPassCreateInfo::builder()
+                .attachments(&attachments)
+                .subpasses(&subpasses);
+            // TODO: .dependencies(...);
 
             unsafe {
                 gpu.device
@@ -641,6 +632,35 @@ impl VulkanApp {
                     .expect("Failed to create render pass!")
             }
         };
+
+        // # Create framebuffers
+        let framebuffers: Vec<vk::Framebuffer> = {
+            swapchain_imageviews
+                .iter()
+                .map(|&imageview| {
+                    let attachments = [imageview];
+
+                    let framebuffer_create_info = vk::FramebufferCreateInfo {
+                        s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
+                        p_next: ptr::null(),
+                        flags: vk::FramebufferCreateFlags::empty(),
+                        render_pass,
+                        attachment_count: attachments.len() as u32,
+                        p_attachments: attachments.as_ptr(),
+                        width: swapchain_extent.width,
+                        height: swapchain_extent.height,
+                        layers: 1,
+                    };
+
+                    unsafe {
+                        gpu.device
+                            .create_framebuffer(&framebuffer_create_info, None)
+                            .expect("Failed to create Framebuffer!")
+                    }
+                })
+                .collect()
+        };
+
         // 12. Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
@@ -848,40 +868,12 @@ impl VulkanApp {
             (graphics_pipelines[0], pipeline_layout)
         };
 
-        // 13. Create framebuffers
-        let swapchain_framebuffers: Vec<vk::Framebuffer> = {
-            swapchain_imageviews
-                .iter()
-                .map(|&imageview| {
-                    let attachments = [imageview];
-
-                    let framebuffer_create_info = vk::FramebufferCreateInfo {
-                        s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
-                        p_next: ptr::null(),
-                        flags: vk::FramebufferCreateFlags::empty(),
-                        render_pass,
-                        attachment_count: attachments.len() as u32,
-                        p_attachments: attachments.as_ptr(),
-                        width: swapchain_extent.width,
-                        height: swapchain_extent.height,
-                        layers: 1,
-                    };
-
-                    unsafe {
-                        gpu.device
-                            .create_framebuffer(&framebuffer_create_info, None)
-                            .expect("Failed to create Framebuffer!")
-                    }
-                })
-                .collect()
-        };
-
         // 14. Create command buffers
         let command_buffers_2 = {
             let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
                 s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: ptr::null(),
-                command_buffer_count: swapchain_framebuffers.len() as u32,
+                command_buffer_count: framebuffers.len() as u32,
                 command_pool: command_pool,
                 level: vk::CommandBufferLevel::PRIMARY,
             };
@@ -916,7 +908,7 @@ impl VulkanApp {
                     s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
                     p_next: ptr::null(),
                     render_pass,
-                    framebuffer: swapchain_framebuffers[i],
+                    framebuffer: framebuffers[i],
                     render_area: vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
                         extent: swapchain_extent,
@@ -973,7 +965,7 @@ impl VulkanApp {
             _swapchain_extent: swapchain_extent,
             _swapchain_images: swapchain_images,
             swapchain_imageviews,
-            swapchain_framebuffers,
+            framebuffers,
 
             debug_messenger,
             validation_layers,
@@ -1081,7 +1073,7 @@ impl Drop for VulkanApp {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            for &framebuffer in self.swapchain_framebuffers.iter() {
+            for &framebuffer in self.framebuffers.iter() {
                 self.gpu.device.destroy_framebuffer(framebuffer, None);
             }
 
