@@ -57,14 +57,15 @@ struct VulkanApp {
     // TODO: Depth image
     render_pass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
+    // - Pipelines
+    pipeline_layout: vk::PipelineLayout,
+    graphics_pipeline: vk::Pipeline,
     // - Commands
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
-    pipeline_layout: vk::PipelineLayout,
-    graphics_pipeline: vk::Pipeline,
     current_frame: usize,
 }
 
@@ -638,7 +639,7 @@ impl VulkanApp {
                 .collect()
         };
 
-        // 12. Create graphics pipeline
+        // # Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
                 &gpu.device,
@@ -849,14 +850,15 @@ impl VulkanApp {
             swapchain_imageviews,
             render_pass,
             framebuffers,
+            // - Pipelines
+            graphics_pipeline,
+            pipeline_layout,
             // - Commands
             command_pool,
             command_buffers,
 
             debug_messenger,
             validation_layers,
-            pipeline_layout,
-            graphics_pipeline,
 
             current_frame: 0,
         }
