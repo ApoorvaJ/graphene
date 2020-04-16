@@ -14,7 +14,7 @@ use std::os::raw::c_char;
 use std::ptr;
 
 // Constants
-const NUM_FRAMES_IN_FLIGHT: usize = 2;
+const NUM_FRAMES: usize = 2;
 
 struct Gpu {
     // Physical device
@@ -48,9 +48,6 @@ struct VulkanApp {
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
     command_buffer_complete_fences: Vec<vk::Fence>,
-    // - Commands
-    command_pool: vk::CommandPool,
-    command_buffer: Vec<vk::CommandBuffer>,
     // - Swapchain
     swapchain: vk::SwapchainKHR,
     _swapchain_format: vk::Format,
@@ -60,12 +57,14 @@ struct VulkanApp {
     // TODO: Depth image
     render_pass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
+    // - Commands
+    command_pool: vk::CommandPool,
+    command_buffers: Vec<vk::CommandBuffer>,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
     pipeline_layout: vk::PipelineLayout,
     graphics_pipeline: vk::Pipeline,
-    command_buffers_2: Vec<vk::CommandBuffer>, // TODO: Delete
     current_frame: usize,
 }
 
@@ -382,6 +381,19 @@ impl VulkanApp {
             }
         };
 
+        // # Create command pool
+        let command_pool = {
+            let info = vk::CommandPoolCreateInfo::builder()
+                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                .queue_family_index(gpu.graphics_queue_idx);
+
+            unsafe {
+                gpu.device
+                    .create_command_pool(&info, None)
+                    .expect("Failed to create command pool")
+            }
+        };
+
         // # Synchronization primitives
         let (
             image_available_semaphores,
@@ -395,7 +407,7 @@ impl VulkanApp {
             let fence_create_info =
                 vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
-            for _ in 0..NUM_FRAMES_IN_FLIGHT {
+            for _ in 0..NUM_FRAMES {
                 unsafe {
                     image_available_semaphores.push(
                         gpu.device
@@ -421,41 +433,11 @@ impl VulkanApp {
             )
         };
 
-        // # Create command pool
-        let command_pool = {
-            let info = vk::CommandPoolCreateInfo::builder()
-                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                .queue_family_index(gpu.graphics_queue_idx);
-
-            unsafe {
-                gpu.device
-                    .create_command_pool(&info, None)
-                    .expect("Failed to create command pool")
-            }
-        };
-
-        // # Allocate command buffer
-        let command_buffer = {
-            let info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(NUM_FRAMES_IN_FLIGHT as u32);
-
-            unsafe {
-                gpu.device
-                    .allocate_command_buffers(&info)
-                    .expect("Failed to allocate command buffer")
-            }
-        };
-
         // # Create swapchain
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
         let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
             // Set number of images in swapchain
-            let image_count = gpu
-                .surface_caps
-                .min_image_count
-                .max(NUM_FRAMES_IN_FLIGHT as u32);
+            let image_count = gpu.surface_caps.min_image_count.max(NUM_FRAMES as u32);
 
             // Choose swapchain format (i.e. color buffer format)
             let (swapchain_format, swapchain_color_space) = {
@@ -868,78 +850,66 @@ impl VulkanApp {
             (graphics_pipelines[0], pipeline_layout)
         };
 
-        // 14. Create command buffers
-        let command_buffers_2 = {
-            let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
-                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                p_next: ptr::null(),
-                command_buffer_count: framebuffers.len() as u32,
-                command_pool: command_pool,
-                level: vk::CommandBufferLevel::PRIMARY,
-            };
+        // # Allocate command buffers
+        let command_buffers = {
+            let info = vk::CommandBufferAllocateInfo::builder()
+                .command_pool(command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(NUM_FRAMES as u32);
 
-            let command_buffers_2 = unsafe {
+            unsafe {
                 gpu.device
-                    .allocate_command_buffers(&command_buffer_allocate_info)
-                    .expect("Failed to allocate Command Buffers!")
-            };
+                    .allocate_command_buffers(&info)
+                    .expect("Failed to allocate command buffer")
+            }
+        };
 
-            for (i, &command_buffer) in command_buffers_2.iter().enumerate() {
-                let command_buffer_begin_info = vk::CommandBufferBeginInfo {
-                    s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                    p_next: ptr::null(),
-                    p_inheritance_info: ptr::null(),
-                    flags: vk::CommandBufferUsageFlags::SIMULTANEOUS_USE,
-                };
+        // # Record command buffers
+        for (i, &command_buffer) in command_buffers.iter().enumerate() {
+            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
-                unsafe {
-                    gpu.device
-                        .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                        .expect("Failed to begin recording Command Buffer at beginning!");
-                }
-
-                let clear_values = [vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                }];
-
-                let render_pass_begin_info = vk::RenderPassBeginInfo {
-                    s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
-                    p_next: ptr::null(),
-                    render_pass,
-                    framebuffer: framebuffers[i],
-                    render_area: vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: swapchain_extent,
-                    },
-                    clear_value_count: clear_values.len() as u32,
-                    p_clear_values: clear_values.as_ptr(),
-                };
-
-                unsafe {
-                    gpu.device.cmd_begin_render_pass(
-                        command_buffer,
-                        &render_pass_begin_info,
-                        vk::SubpassContents::INLINE,
-                    );
-                    gpu.device.cmd_bind_pipeline(
-                        command_buffer,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        graphics_pipeline,
-                    );
-                    gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
-
-                    gpu.device.cmd_end_render_pass(command_buffer);
-
-                    gpu.device
-                        .end_command_buffer(command_buffer)
-                        .expect("Failed to record Command Buffer at Ending!");
-                }
+            unsafe {
+                gpu.device
+                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+                    .expect("Failed to begin recording Command Buffer at beginning!");
             }
 
-            command_buffers_2
-        };
+            let clear_values = [vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            }];
+
+            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+                .render_pass(render_pass)
+                .framebuffer(framebuffers[i])
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: swapchain_extent,
+                })
+                .clear_values(&clear_values);
+
+            unsafe {
+                gpu.device.cmd_begin_render_pass(
+                    command_buffer,
+                    &render_pass_begin_info,
+                    vk::SubpassContents::INLINE,
+                );
+                gpu.device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    graphics_pipeline,
+                );
+                gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
+
+                gpu.device.cmd_end_render_pass(command_buffer);
+
+                gpu.device
+                    .end_command_buffer(command_buffer)
+                    .expect("Failed to record Command Buffer at Ending!");
+            }
+        }
 
         VulkanApp {
             window,
@@ -958,7 +928,7 @@ impl VulkanApp {
             command_buffer_complete_fences,
             // - Commands
             command_pool,
-            command_buffer,
+            command_buffers,
             // - Swapchain
             swapchain,
             _swapchain_format: swapchain_format,
@@ -972,7 +942,6 @@ impl VulkanApp {
             pipeline_layout,
             render_pass,
             graphics_pipeline,
-            command_buffers_2,
 
             current_frame: 0,
         }
@@ -1008,7 +977,7 @@ impl VulkanApp {
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
             command_buffer_count: 1,
-            p_command_buffers: &self.command_buffers_2[image_index as usize],
+            p_command_buffers: &self.command_buffers[image_index as usize],
             signal_semaphore_count: signal_semaphores.len() as u32,
             p_signal_semaphores: signal_semaphores.as_ptr(),
         }];
@@ -1048,7 +1017,7 @@ impl VulkanApp {
                 .expect("Failed to execute queue present.");
         }
 
-        self.current_frame = (self.current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
+        self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
     }
 }
 
@@ -1057,7 +1026,7 @@ impl Drop for VulkanApp {
         unsafe {
             // TODO: Move these into their own sub-object drop traits.
             // e.g. the gpu can have its own drop() trait
-            for i in 0..NUM_FRAMES_IN_FLIGHT {
+            for i in 0..NUM_FRAMES {
                 self.gpu
                     .device
                     .destroy_semaphore(self.image_available_semaphores[i], None);
