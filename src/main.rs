@@ -51,6 +51,12 @@ struct Apparatus {
     graphics_pipeline: vk::Pipeline,
     // - Commands
     command_buffers: Vec<vk::CommandBuffer>,
+    // - Synchronization primitives. these aren't really resolution-dependent
+    //   and could technically be moved outside the struct. They are kept here
+    //   because they're closely related to the rest of the members.
+    image_available_semaphores: Vec<vk::Semaphore>,
+    render_finished_semaphores: Vec<vk::Semaphore>,
+    command_buffer_complete_fences: Vec<vk::Fence>,
 }
 
 struct VulkanApp {
@@ -65,10 +71,6 @@ struct VulkanApp {
     // - Device
     gpu: Gpu,
     command_pool: vk::CommandPool,
-    // - Synchronization primitives
-    image_available_semaphores: Vec<vk::Semaphore>,
-    render_finished_semaphores: Vec<vk::Semaphore>,
-    command_buffer_complete_fences: Vec<vk::Fence>,
     // - Resolution-dependent apparatus
     apparatus: Apparatus,
 
@@ -510,6 +512,45 @@ impl Apparatus {
             }
         }
 
+        // # Synchronization primitives
+        let (
+            image_available_semaphores,
+            render_finished_semaphores,
+            command_buffer_complete_fences,
+        ) = {
+            let mut image_available_semaphores = Vec::new();
+            let mut render_finished_semaphores = Vec::new();
+            let mut command_buffer_complete_fences = Vec::new();
+            let semaphore_create_info = vk::SemaphoreCreateInfo::builder();
+            let fence_create_info =
+                vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
+
+            for _ in 0..NUM_FRAMES {
+                unsafe {
+                    image_available_semaphores.push(
+                        gpu.device
+                            .create_semaphore(&semaphore_create_info, None)
+                            .expect("Failed to create Semaphore Object!"),
+                    );
+                    render_finished_semaphores.push(
+                        gpu.device
+                            .create_semaphore(&semaphore_create_info, None)
+                            .expect("Failed to create Semaphore Object!"),
+                    );
+                    command_buffer_complete_fences.push(
+                        gpu.device
+                            .create_fence(&fence_create_info, None)
+                            .expect("Failed to create Fence Object!"),
+                    );
+                }
+            }
+            (
+                image_available_semaphores,
+                render_finished_semaphores,
+                command_buffer_complete_fences,
+            )
+        };
+
         Apparatus {
             _surface_caps: surface_caps,
             _surface_formats: surface_formats,
@@ -523,10 +564,23 @@ impl Apparatus {
             graphics_pipeline,
             pipeline_layout,
             command_buffers,
+            image_available_semaphores,
+            render_finished_semaphores,
+            command_buffer_complete_fences,
         }
     }
+
     pub fn destroy(&self, gpu: &Gpu, ext_swapchain: &ash::extensions::khr::Swapchain) {
         unsafe {
+            for i in 0..NUM_FRAMES {
+                gpu.device
+                    .destroy_semaphore(self.image_available_semaphores[i], None);
+                gpu.device
+                    .destroy_semaphore(self.render_finished_semaphores[i], None);
+                gpu.device
+                    .destroy_fence(self.command_buffer_complete_fences[i], None);
+            }
+
             gpu.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             gpu.device.destroy_pipeline(self.graphics_pipeline, None);
@@ -854,45 +908,6 @@ impl VulkanApp {
             }
         };
 
-        // # Synchronization primitives
-        let (
-            image_available_semaphores,
-            render_finished_semaphores,
-            command_buffer_complete_fences,
-        ) = {
-            let mut image_available_semaphores = Vec::new();
-            let mut render_finished_semaphores = Vec::new();
-            let mut command_buffer_complete_fences = Vec::new();
-            let semaphore_create_info = vk::SemaphoreCreateInfo::builder();
-            let fence_create_info =
-                vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
-
-            for _ in 0..NUM_FRAMES {
-                unsafe {
-                    image_available_semaphores.push(
-                        gpu.device
-                            .create_semaphore(&semaphore_create_info, None)
-                            .expect("Failed to create Semaphore Object!"),
-                    );
-                    render_finished_semaphores.push(
-                        gpu.device
-                            .create_semaphore(&semaphore_create_info, None)
-                            .expect("Failed to create Semaphore Object!"),
-                    );
-                    command_buffer_complete_fences.push(
-                        gpu.device
-                            .create_fence(&fence_create_info, None)
-                            .expect("Failed to create Fence Object!"),
-                    );
-                }
-            }
-            (
-                image_available_semaphores,
-                render_finished_semaphores,
-                command_buffer_complete_fences,
-            )
-        };
-
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
 
         // Big call
@@ -917,10 +932,6 @@ impl VulkanApp {
             // - Device
             gpu,
             command_pool,
-            // - Synchronization primitives
-            image_available_semaphores,
-            render_finished_semaphores,
-            command_buffer_complete_fences,
             // - Resolution-dependent apparatus
             apparatus,
 
@@ -932,7 +943,7 @@ impl VulkanApp {
     }
 
     fn draw_frame(&mut self) {
-        let wait_fences = [self.command_buffer_complete_fences[self.current_frame]];
+        let wait_fences = [self.apparatus.command_buffer_complete_fences[self.current_frame]];
 
         let (image_index, _is_sub_optimal) = unsafe {
             self.gpu
@@ -943,7 +954,7 @@ impl VulkanApp {
             let result = self.ext_swapchain.acquire_next_image(
                 self.apparatus.swapchain,
                 std::u64::MAX,
-                self.image_available_semaphores[self.current_frame],
+                self.apparatus.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
             );
             match result {
@@ -952,6 +963,7 @@ impl VulkanApp {
                     match error_code {
                         vk::Result::ERROR_OUT_OF_DATE_KHR => {
                             // Window is resized. Recreate the swapchain
+                            // and exit early without drawing this frame.
                             self.recreate_resolution_dependent_state();
                             return;
                         }
@@ -962,8 +974,8 @@ impl VulkanApp {
         };
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let wait_semaphores = [self.image_available_semaphores[self.current_frame]];
-        let signal_semaphores = [self.render_finished_semaphores[self.current_frame]];
+        let wait_semaphores = [self.apparatus.image_available_semaphores[self.current_frame]];
+        let signal_semaphores = [self.apparatus.render_finished_semaphores[self.current_frame]];
 
         let submit_infos = [vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
@@ -988,7 +1000,7 @@ impl VulkanApp {
                 .queue_submit(
                     self.gpu.graphics_queue,
                     &submit_infos,
-                    self.command_buffer_complete_fences[self.current_frame],
+                    self.apparatus.command_buffer_complete_fences[self.current_frame],
                 )
                 .expect("Failed to execute queue submit.");
         }
@@ -1031,20 +1043,6 @@ impl VulkanApp {
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
-            // TODO: Move these into their own sub-object drop traits.
-            // e.g. the gpu can have its own drop() trait
-            for i in 0..NUM_FRAMES {
-                self.gpu
-                    .device
-                    .destroy_semaphore(self.image_available_semaphores[i], None);
-                self.gpu
-                    .device
-                    .destroy_semaphore(self.render_finished_semaphores[i], None);
-                self.gpu
-                    .device
-                    .destroy_fence(self.command_buffer_complete_fences[i], None);
-            }
-
             self.gpu
                 .device
                 .destroy_command_pool(self.command_pool, None);
