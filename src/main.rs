@@ -18,10 +18,8 @@ const NUM_FRAMES: usize = 2;
 
 struct Gpu {
     // Physical device
-    _physical_device: vk::PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     _exts: Vec<vk::ExtensionProperties>,
-    surface_caps: vk::SurfaceCapabilitiesKHR,
-    surface_formats: Vec<vk::SurfaceFormatKHR>,
     present_modes: Vec<vk::PresentModeKHR>,
     _memory_properties: vk::PhysicalDeviceMemoryProperties,
     _properties: vk::PhysicalDeviceProperties,
@@ -48,6 +46,9 @@ struct VulkanApp {
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
     command_buffer_complete_fences: Vec<vk::Fence>,
+    // - Surface capabilities and formats
+    surface_caps: vk::SurfaceCapabilitiesKHR,
+    surface_formats: Vec<vk::SurfaceFormatKHR>,
     // - Swapchain
     swapchain: vk::SwapchainKHR,
     _swapchain_format: vk::Format,
@@ -89,7 +90,505 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
     }
 }
 
+fn create_resolution_dependent_vulkan_state(
+    window: &winit::window::Window,
+    surface: vk::SurfaceKHR,
+    gpu: &Gpu,
+    command_pool: vk::CommandPool,
+    ext_surface: &ash::extensions::khr::Surface,
+    ext_swapchain: &ash::extensions::khr::Swapchain,
+) -> (
+    vk::SurfaceCapabilitiesKHR,
+    Vec<vk::SurfaceFormatKHR>,
+    vk::SwapchainKHR,
+    vk::Format,
+    vk::Extent2D,
+    Vec<vk::Image>,
+    Vec<vk::ImageView>,
+    vk::RenderPass,
+    Vec<vk::Framebuffer>,
+    vk::Pipeline,
+    vk::PipelineLayout,
+    Vec<vk::CommandBuffer>,
+) {
+    let surface_caps = unsafe {
+        ext_surface
+            .get_physical_device_surface_capabilities(gpu.physical_device, surface)
+            .expect("Failed to query for surface capabilities.")
+    };
+
+    let surface_formats = unsafe {
+        ext_surface
+            .get_physical_device_surface_formats(gpu.physical_device, surface)
+            .expect("Failed to query for surface formats.")
+    };
+
+    // # Create swapchain
+    let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
+        // Set number of images in swapchain
+        let image_count = surface_caps.min_image_count.max(NUM_FRAMES as u32);
+
+        // Choose swapchain format (i.e. color buffer format)
+        let (swapchain_format, swapchain_color_space) = {
+            let surface_format: vk::SurfaceFormatKHR = {
+                *surface_formats
+                    .iter()
+                    .find(|&f| {
+                        f.format == vk::Format::B8G8R8A8_SRGB
+                            && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                    })
+                    .unwrap_or(&surface_formats[0])
+            };
+            (surface_format.format, surface_format.color_space)
+        };
+
+        // Choose extent
+        let extent = {
+            if surface_caps.current_extent.width == u32::max_value() {
+                let window_size = window.inner_size();
+                vk::Extent2D {
+                    width: (window_size.width as u32)
+                        .max(surface_caps.min_image_extent.width)
+                        .min(surface_caps.max_image_extent.width),
+                    height: (window_size.height as u32)
+                        .max(surface_caps.min_image_extent.height)
+                        .min(surface_caps.max_image_extent.height),
+                }
+            } else {
+                surface_caps.current_extent
+            }
+        };
+
+        // Present mode
+        let present_mode: vk::PresentModeKHR = {
+            *gpu.present_modes
+                .iter()
+                .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
+                .unwrap_or(&vk::PresentModeKHR::FIFO)
+        };
+
+        let mut info = vk::SwapchainCreateInfoKHR::builder()
+            .surface(surface)
+            .min_image_count(image_count)
+            .image_format(swapchain_format)
+            .image_color_space(swapchain_color_space)
+            .image_extent(extent)
+            .image_array_layers(1)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+            // TODO: Investigate:
+            // The vulkan tutorial sets this as `pre_transform(gpu.surface_caps.current_transform)`.
+            .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
+            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+            .present_mode(present_mode)
+            .clipped(true); // Allow Vulkan to discard operations outside of the renderable space
+
+        // Sharing mode
+        let indices = [gpu.graphics_queue_idx, gpu.present_queue_idx];
+        if gpu.graphics_queue_idx != gpu.present_queue_idx {
+            info = info
+                .image_sharing_mode(vk::SharingMode::CONCURRENT)
+                .queue_family_indices(&indices);
+        } else {
+            // Graphics and present are the same queue, so it can have
+            // exclusive access to the swapchain
+            info = info.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
+        }
+
+        let swapchain = unsafe {
+            ext_swapchain
+                .create_swapchain(&info, None)
+                .expect("Failed to create Swapchain!")
+        };
+
+        let images = unsafe {
+            ext_swapchain
+                .get_swapchain_images(swapchain)
+                .expect("Failed to get Swapchain Images.")
+        };
+
+        (swapchain, swapchain_format, extent, images)
+    };
+
+    // # Create swapchain image views
+    let swapchain_imageviews = {
+        let imageviews: Vec<vk::ImageView> = swapchain_images
+            .iter()
+            .map(|&image| {
+                let info = vk::ImageViewCreateInfo::builder()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(swapchain_format)
+                    .components(vk::ComponentMapping {
+                        r: vk::ComponentSwizzle::IDENTITY,
+                        g: vk::ComponentSwizzle::IDENTITY,
+                        b: vk::ComponentSwizzle::IDENTITY,
+                        a: vk::ComponentSwizzle::IDENTITY,
+                    })
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    });
+
+                unsafe {
+                    gpu.device
+                        .create_image_view(&info, None)
+                        .expect("Failed to create image view.")
+                }
+            })
+            .collect();
+
+        imageviews
+    };
+
+    // # Create render pass
+    let render_pass = {
+        let attachments = vec![
+            // Color attachment
+            vk::AttachmentDescription {
+                format: swapchain_format,
+                flags: vk::AttachmentDescriptionFlags::empty(),
+                samples: vk::SampleCountFlags::TYPE_1,
+                load_op: vk::AttachmentLoadOp::DONT_CARE,
+                store_op: vk::AttachmentStoreOp::STORE,
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: vk::ImageLayout::UNDEFINED,
+                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            },
+            // TODO: Depth attachment
+            // vk::AttachmentDescription {
+            //     format: depth_format, // TODO: Choose this format
+            //     flags: vk::AttachmentDescriptionFlags::empty(),
+            //     samples: vk::SampleCountFlags::TYPE_1,
+            //     load_op: vk::AttachmentLoadOp::DONT_CARE,
+            //     store_op: vk::AttachmentStoreOp::DONT_CARE,
+            //     stencil_load_op: vk::AttachmentLoadOp::LOAD, // ?
+            //     stencil_store_op: vk::AttachmentStoreOp::STORE, // ?
+            //     initial_layout: vk::ImageLayout::UNDEFINED,
+            //     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            // },
+        ];
+
+        let color_attachment_ref = [vk::AttachmentReference {
+            attachment: 0,
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        }];
+        // TODO: Depth attachment ref
+        // let depth_attachment_ref = vk::AttachmentReference {
+        //     attachment: 1,
+        //     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        // };
+
+        let subpasses = [vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&color_attachment_ref)
+            // .depth_stencil_attachment(&depth_attachment_ref)
+            .build()];
+
+        // TODO: Subpass dependencies
+
+        let renderpass_create_info = vk::RenderPassCreateInfo::builder()
+            .attachments(&attachments)
+            .subpasses(&subpasses);
+        // TODO: .dependencies(...);
+
+        unsafe {
+            gpu.device
+                .create_render_pass(&renderpass_create_info, None)
+                .expect("Failed to create render pass!")
+        }
+    };
+
+    // # Create framebuffers
+    let framebuffers: Vec<vk::Framebuffer> = {
+        swapchain_imageviews
+            .iter()
+            .map(|&imageview| {
+                let attachments = [imageview];
+
+                let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+                    .render_pass(render_pass)
+                    .attachments(&attachments)
+                    .width(swapchain_extent.width)
+                    .height(swapchain_extent.height)
+                    .layers(1);
+
+                unsafe {
+                    gpu.device
+                        .create_framebuffer(&framebuffer_create_info, None)
+                        .expect("Failed to create Framebuffer!")
+                }
+            })
+            .collect()
+    };
+
+    // # Create graphics pipeline
+    let (graphics_pipeline, pipeline_layout) = {
+        let vert_shader_module = create_shader_module(
+            &gpu.device,
+            include_bytes!("../shaders/spv/09-shader-base.vert.spv").to_vec(),
+        );
+        let frag_shader_module = create_shader_module(
+            &gpu.device,
+            include_bytes!("../shaders/spv/09-shader-base.frag.spv").to_vec(),
+        );
+
+        let main_function_name = CString::new("main").unwrap();
+
+        let shader_stages = [
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::VERTEX)
+                .module(vert_shader_module)
+                .name(&main_function_name)
+                .build(),
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::FRAGMENT)
+                .module(frag_shader_module)
+                .name(&main_function_name)
+                .build(),
+        ];
+
+        let vertex_input_state_create_info =
+            vk::PipelineVertexInputStateCreateInfo::builder().build();
+
+        let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+            .build();
+
+        let viewports = [vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: swapchain_extent.width as f32,
+            height: swapchain_extent.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        }];
+
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: swapchain_extent,
+        }];
+
+        let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
+            .scissors(&scissors)
+            .viewports(&viewports)
+            .build();
+
+        let rasterization_state_create_info = vk::PipelineRasterizationStateCreateInfo::builder()
+            .polygon_mode(vk::PolygonMode::FILL)
+            .cull_mode(vk::CullModeFlags::BACK)
+            .front_face(vk::FrontFace::CLOCKWISE) // TODO: Change to COUNTER_CLOCKWISE
+            .line_width(1.0)
+            .build();
+
+        let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo::builder()
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+            .build();
+
+        // TODO: Depth
+        let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo::builder().build();
+
+        let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
+            blend_enable: vk::FALSE,
+            color_write_mask: vk::ColorComponentFlags::all(),
+            src_color_blend_factor: vk::BlendFactor::ONE,
+            dst_color_blend_factor: vk::BlendFactor::ZERO,
+            color_blend_op: vk::BlendOp::ADD,
+            src_alpha_blend_factor: vk::BlendFactor::ONE,
+            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+            alpha_blend_op: vk::BlendOp::ADD,
+        }];
+
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
+            .attachments(&color_blend_attachment_states)
+            .blend_constants([0.0, 0.0, 0.0, 0.0])
+            .build();
+
+        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::builder();
+
+        let pipeline_layout = unsafe {
+            gpu.device
+                .create_pipeline_layout(&pipeline_layout_create_info, None)
+                .expect("Failed to create pipeline layout.")
+        };
+
+        let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
+            .stages(&shader_stages)
+            .vertex_input_state(&vertex_input_state_create_info)
+            .input_assembly_state(&vertex_input_assembly_state_info)
+            // Skip tesselation
+            .viewport_state(&viewport_state_create_info)
+            .rasterization_state(&rasterization_state_create_info)
+            .multisample_state(&multisample_state_create_info)
+            .depth_stencil_state(&depth_state_create_info)
+            .color_blend_state(&color_blend_state)
+            // No dynamic state
+            .layout(pipeline_layout)
+            .render_pass(render_pass)
+            .subpass(0)
+            .build()];
+
+        let graphics_pipelines = unsafe {
+            gpu.device
+                .create_graphics_pipelines(
+                    vk::PipelineCache::null(),
+                    &graphic_pipeline_create_infos,
+                    None,
+                )
+                .expect("Failed to create Graphics Pipeline.")
+        };
+
+        unsafe {
+            gpu.device.destroy_shader_module(vert_shader_module, None);
+            gpu.device.destroy_shader_module(frag_shader_module, None);
+        }
+
+        (graphics_pipelines[0], pipeline_layout)
+    };
+
+    // # Allocate command buffers
+    let command_buffers = {
+        let info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(NUM_FRAMES as u32);
+
+        unsafe {
+            gpu.device
+                .allocate_command_buffers(&info)
+                .expect("Failed to allocate command buffer.")
+        }
+    };
+
+    // # Record command buffers
+    for (i, &command_buffer) in command_buffers.iter().enumerate() {
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+
+        unsafe {
+            gpu.device
+                .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+                .expect("Failed to begin recording Command Buffer");
+        }
+
+        let clear_values = [vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        }];
+
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(render_pass)
+            .framebuffer(framebuffers[i])
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: swapchain_extent,
+            })
+            .clear_values(&clear_values);
+
+        unsafe {
+            gpu.device.cmd_begin_render_pass(
+                command_buffer,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+            gpu.device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                graphics_pipeline,
+            );
+            gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
+
+            gpu.device.cmd_end_render_pass(command_buffer);
+
+            gpu.device
+                .end_command_buffer(command_buffer)
+                .expect("Failed to record Command Buffer at Ending!");
+        }
+    }
+
+    (
+        surface_caps,
+        surface_formats,
+        swapchain,
+        swapchain_format,
+        swapchain_extent,
+        swapchain_images,
+        swapchain_imageviews,
+        render_pass,
+        framebuffers,
+        graphics_pipeline,
+        pipeline_layout,
+        command_buffers,
+    )
+}
+
 impl VulkanApp {
+    pub fn destroy_resolution_dependent_state(&self) {
+        unsafe {
+            self.gpu
+                .device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.gpu
+                .device
+                .destroy_pipeline(self.graphics_pipeline, None);
+            for &framebuffer in self.framebuffers.iter() {
+                self.gpu.device.destroy_framebuffer(framebuffer, None);
+            }
+            self.gpu.device.destroy_render_pass(self.render_pass, None);
+            for &imageview in self.swapchain_imageviews.iter() {
+                self.gpu.device.destroy_image_view(imageview, None);
+            }
+            self.ext_swapchain.destroy_swapchain(self.swapchain, None);
+        }
+    }
+
+    pub fn recreate_resolution_dependent_state(&mut self) {
+        unsafe {
+            self.gpu
+                .device
+                .device_wait_idle()
+                .expect("Failed to wait device idle!")
+        };
+        self.destroy_resolution_dependent_state();
+        let (
+            surface_caps,
+            surface_formats,
+            swapchain,
+            swapchain_format,
+            swapchain_extent,
+            swapchain_images,
+            swapchain_imageviews,
+            render_pass,
+            framebuffers,
+            graphics_pipeline,
+            pipeline_layout,
+            command_buffers,
+        ) = create_resolution_dependent_vulkan_state(
+            &self.window,
+            self.surface,
+            &self.gpu,
+            self.command_pool,
+            &self.ext_surface,
+            &self.ext_swapchain,
+        );
+        self.surface_caps = surface_caps;
+        self.surface_formats = surface_formats;
+        self.swapchain = swapchain;
+        self._swapchain_format = swapchain_format;
+        self._swapchain_extent = swapchain_extent;
+        self._swapchain_images = swapchain_images;
+        self.swapchain_imageviews = swapchain_imageviews;
+        self.render_pass = render_pass;
+        self.framebuffers = framebuffers;
+        self.graphics_pipeline = graphics_pipeline;
+        self.pipeline_layout = pipeline_layout;
+        self.command_buffers = command_buffers;
+    }
+
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
         const APP_NAME: &str = "Hello Triangle";
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
@@ -193,8 +692,6 @@ impl VulkanApp {
         struct CandidateGpu {
             physical_device: vk::PhysicalDevice,
             exts: Vec<vk::ExtensionProperties>,
-            surface_caps: vk::SurfaceCapabilitiesKHR,
-            surface_formats: Vec<vk::SurfaceFormatKHR>,
             present_modes: Vec<vk::PresentModeKHR>,
             memory_properties: vk::PhysicalDeviceMemoryProperties,
             properties: vk::PhysicalDeviceProperties,
@@ -232,12 +729,6 @@ impl VulkanApp {
                 if !are_exts_supported {
                     continue;
                 }
-
-                let surface_caps = unsafe {
-                    ext_surface
-                        .get_physical_device_surface_capabilities(physical_device, surface)
-                        .expect("Failed to query for surface capabilities.")
-                };
 
                 let surface_formats = unsafe {
                     ext_surface
@@ -287,8 +778,6 @@ impl VulkanApp {
                         candidate_gpus.push(CandidateGpu {
                             physical_device,
                             exts,
-                            surface_caps,
-                            surface_formats,
                             present_modes,
                             memory_properties,
                             properties,
@@ -366,10 +855,8 @@ impl VulkanApp {
 
             Gpu {
                 // Physical device
-                _physical_device: cgpu.physical_device,
+                physical_device: cgpu.physical_device,
                 _exts: cgpu.exts.clone(),
-                surface_caps: cgpu.surface_caps,
-                surface_formats: cgpu.surface_formats.clone(),
                 present_modes: cgpu.present_modes.clone(),
                 _memory_properties: cgpu.memory_properties,
                 _properties: cgpu.properties,
@@ -434,398 +921,29 @@ impl VulkanApp {
             )
         };
 
-        // # Create swapchain
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
-        let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
-            // Set number of images in swapchain
-            let image_count = gpu.surface_caps.min_image_count.max(NUM_FRAMES as u32);
 
-            // Choose swapchain format (i.e. color buffer format)
-            let (swapchain_format, swapchain_color_space) = {
-                let surface_format: vk::SurfaceFormatKHR = {
-                    *gpu.surface_formats
-                        .iter()
-                        .find(|&f| {
-                            f.format == vk::Format::B8G8R8A8_SRGB
-                                && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-                        })
-                        .unwrap_or(&gpu.surface_formats[0])
-                };
-                (surface_format.format, surface_format.color_space)
-            };
-
-            // Choose extent
-            let extent = {
-                if gpu.surface_caps.current_extent.width == u32::max_value() {
-                    let window_size = window.inner_size();
-                    vk::Extent2D {
-                        width: (window_size.width as u32)
-                            .max(gpu.surface_caps.min_image_extent.width)
-                            .min(gpu.surface_caps.max_image_extent.width),
-                        height: (window_size.height as u32)
-                            .max(gpu.surface_caps.min_image_extent.height)
-                            .min(gpu.surface_caps.max_image_extent.height),
-                    }
-                } else {
-                    gpu.surface_caps.current_extent
-                }
-            };
-
-            // Present mode
-            let present_mode: vk::PresentModeKHR = {
-                *gpu.present_modes
-                    .iter()
-                    .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
-                    .unwrap_or(&vk::PresentModeKHR::FIFO)
-            };
-
-            let mut info = vk::SwapchainCreateInfoKHR::builder()
-                .surface(surface)
-                .min_image_count(image_count)
-                .image_format(swapchain_format)
-                .image_color_space(swapchain_color_space)
-                .image_extent(extent)
-                .image_array_layers(1)
-                .image_usage(
-                    vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
-                )
-                // TODO: Investigate:
-                // The vulkan tutorial sets this as `pre_transform(gpu.surface_caps.current_transform)`.
-                .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
-                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                .present_mode(present_mode)
-                .clipped(true); // Allow Vulkan to discard operations outside of the renderable space
-
-            // Sharing mode
-            let indices = [gpu.graphics_queue_idx, gpu.present_queue_idx];
-            if gpu.graphics_queue_idx != gpu.present_queue_idx {
-                info = info
-                    .image_sharing_mode(vk::SharingMode::CONCURRENT)
-                    .queue_family_indices(&indices);
-            } else {
-                // Graphics and present are the same queue, so it can have
-                // exclusive access to the swapchain
-                info = info.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
-            }
-
-            let swapchain = unsafe {
-                ext_swapchain
-                    .create_swapchain(&info, None)
-                    .expect("Failed to create Swapchain!")
-            };
-
-            let images = unsafe {
-                ext_swapchain
-                    .get_swapchain_images(swapchain)
-                    .expect("Failed to get Swapchain Images.")
-            };
-
-            (swapchain, swapchain_format, extent, images)
-        };
-
-        // # Create swapchain image views
-        let swapchain_imageviews = {
-            let imageviews: Vec<vk::ImageView> = swapchain_images
-                .iter()
-                .map(|&image| {
-                    let info = vk::ImageViewCreateInfo::builder()
-                        .image(image)
-                        .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(swapchain_format)
-                        .components(vk::ComponentMapping {
-                            r: vk::ComponentSwizzle::IDENTITY,
-                            g: vk::ComponentSwizzle::IDENTITY,
-                            b: vk::ComponentSwizzle::IDENTITY,
-                            a: vk::ComponentSwizzle::IDENTITY,
-                        })
-                        .subresource_range(vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        });
-
-                    unsafe {
-                        gpu.device
-                            .create_image_view(&info, None)
-                            .expect("Failed to create Image View!")
-                    }
-                })
-                .collect();
-
-            imageviews
-        };
-
-        // # Create render pass
-        let render_pass = {
-            let attachments = vec![
-                // Color attachment
-                vk::AttachmentDescription {
-                    format: swapchain_format,
-                    flags: vk::AttachmentDescriptionFlags::empty(),
-                    samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::DONT_CARE,
-                    store_op: vk::AttachmentStoreOp::STORE,
-                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                    initial_layout: vk::ImageLayout::UNDEFINED,
-                    final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                },
-                // TODO: Depth attachment
-                // vk::AttachmentDescription {
-                //     format: depth_format, // TODO: Choose this format
-                //     flags: vk::AttachmentDescriptionFlags::empty(),
-                //     samples: vk::SampleCountFlags::TYPE_1,
-                //     load_op: vk::AttachmentLoadOp::DONT_CARE,
-                //     store_op: vk::AttachmentStoreOp::DONT_CARE,
-                //     stencil_load_op: vk::AttachmentLoadOp::LOAD, // ?
-                //     stencil_store_op: vk::AttachmentStoreOp::STORE, // ?
-                //     initial_layout: vk::ImageLayout::UNDEFINED,
-                //     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                // },
-            ];
-
-            let color_attachment_ref = [vk::AttachmentReference {
-                attachment: 0,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }];
-            // TODO: Depth attachment ref
-            // let depth_attachment_ref = vk::AttachmentReference {
-            //     attachment: 1,
-            //     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            // };
-
-            let subpasses = [vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&color_attachment_ref)
-                // .depth_stencil_attachment(&depth_attachment_ref)
-                .build()];
-
-            // TODO: Subpass dependencies
-
-            let renderpass_create_info = vk::RenderPassCreateInfo::builder()
-                .attachments(&attachments)
-                .subpasses(&subpasses);
-            // TODO: .dependencies(...);
-
-            unsafe {
-                gpu.device
-                    .create_render_pass(&renderpass_create_info, None)
-                    .expect("Failed to create render pass!")
-            }
-        };
-
-        // # Create framebuffers
-        let framebuffers: Vec<vk::Framebuffer> = {
-            swapchain_imageviews
-                .iter()
-                .map(|&imageview| {
-                    let attachments = [imageview];
-
-                    let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
-                        .render_pass(render_pass)
-                        .attachments(&attachments)
-                        .width(swapchain_extent.width)
-                        .height(swapchain_extent.height)
-                        .layers(1);
-
-                    unsafe {
-                        gpu.device
-                            .create_framebuffer(&framebuffer_create_info, None)
-                            .expect("Failed to create Framebuffer!")
-                    }
-                })
-                .collect()
-        };
-
-        // # Create graphics pipeline
-        let (graphics_pipeline, pipeline_layout) = {
-            let vert_shader_module = create_shader_module(
-                &gpu.device,
-                include_bytes!("../shaders/spv/09-shader-base.vert.spv").to_vec(),
-            );
-            let frag_shader_module = create_shader_module(
-                &gpu.device,
-                include_bytes!("../shaders/spv/09-shader-base.frag.spv").to_vec(),
-            );
-
-            let main_function_name = CString::new("main").unwrap();
-
-            let shader_stages = [
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::VERTEX)
-                    .module(vert_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::FRAGMENT)
-                    .module(frag_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-            ];
-
-            let vertex_input_state_create_info =
-                vk::PipelineVertexInputStateCreateInfo::builder().build();
-
-            let vertex_input_assembly_state_info =
-                vk::PipelineInputAssemblyStateCreateInfo::builder()
-                    .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-                    .build();
-
-            let viewports = [vk::Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: swapchain_extent.width as f32,
-                height: swapchain_extent.height as f32,
-                min_depth: 0.0,
-                max_depth: 1.0,
-            }];
-
-            let scissors = [vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: swapchain_extent,
-            }];
-
-            let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
-                .scissors(&scissors)
-                .viewports(&viewports)
-                .build();
-
-            let rasterization_state_create_info =
-                vk::PipelineRasterizationStateCreateInfo::builder()
-                    .polygon_mode(vk::PolygonMode::FILL)
-                    .cull_mode(vk::CullModeFlags::BACK)
-                    .front_face(vk::FrontFace::CLOCKWISE) // TODO: Change to COUNTER_CLOCKWISE
-                    .line_width(1.0)
-                    .build();
-
-            let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo::builder()
-                .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-                .build();
-
-            // TODO: Depth
-            let depth_state_create_info =
-                vk::PipelineDepthStencilStateCreateInfo::builder().build();
-
-            let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
-                blend_enable: vk::FALSE,
-                color_write_mask: vk::ColorComponentFlags::all(),
-                src_color_blend_factor: vk::BlendFactor::ONE,
-                dst_color_blend_factor: vk::BlendFactor::ZERO,
-                color_blend_op: vk::BlendOp::ADD,
-                src_alpha_blend_factor: vk::BlendFactor::ONE,
-                dst_alpha_blend_factor: vk::BlendFactor::ZERO,
-                alpha_blend_op: vk::BlendOp::ADD,
-            }];
-
-            let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-                .attachments(&color_blend_attachment_states)
-                .blend_constants([0.0, 0.0, 0.0, 0.0])
-                .build();
-
-            let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::builder();
-
-            let pipeline_layout = unsafe {
-                gpu.device
-                    .create_pipeline_layout(&pipeline_layout_create_info, None)
-                    .expect("Failed to create pipeline layout.")
-            };
-
-            let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
-                .stages(&shader_stages)
-                .vertex_input_state(&vertex_input_state_create_info)
-                .input_assembly_state(&vertex_input_assembly_state_info)
-                // Skip tesselation
-                .viewport_state(&viewport_state_create_info)
-                .rasterization_state(&rasterization_state_create_info)
-                .multisample_state(&multisample_state_create_info)
-                .depth_stencil_state(&depth_state_create_info)
-                .color_blend_state(&color_blend_state)
-                // No dynamic state
-                .layout(pipeline_layout)
-                .render_pass(render_pass)
-                .subpass(0)
-                .build()];
-
-            let graphics_pipelines = unsafe {
-                gpu.device
-                    .create_graphics_pipelines(
-                        vk::PipelineCache::null(),
-                        &graphic_pipeline_create_infos,
-                        None,
-                    )
-                    .expect("Failed to create Graphics Pipeline.")
-            };
-
-            unsafe {
-                gpu.device.destroy_shader_module(vert_shader_module, None);
-                gpu.device.destroy_shader_module(frag_shader_module, None);
-            }
-
-            (graphics_pipelines[0], pipeline_layout)
-        };
-
-        // # Allocate command buffers
-        let command_buffers = {
-            let info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(NUM_FRAMES as u32);
-
-            unsafe {
-                gpu.device
-                    .allocate_command_buffers(&info)
-                    .expect("Failed to allocate command buffer.")
-            }
-        };
-
-        // # Record command buffers
-        for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-
-            unsafe {
-                gpu.device
-                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                    .expect("Failed to begin recording Command Buffer");
-            }
-
-            let clear_values = [vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            }];
-
-            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-                .render_pass(render_pass)
-                .framebuffer(framebuffers[i])
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: swapchain_extent,
-                })
-                .clear_values(&clear_values);
-
-            unsafe {
-                gpu.device.cmd_begin_render_pass(
-                    command_buffer,
-                    &render_pass_begin_info,
-                    vk::SubpassContents::INLINE,
-                );
-                gpu.device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    graphics_pipeline,
-                );
-                gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
-
-                gpu.device.cmd_end_render_pass(command_buffer);
-
-                gpu.device
-                    .end_command_buffer(command_buffer)
-                    .expect("Failed to record Command Buffer at Ending!");
-            }
-        }
+        let (
+            surface_caps,
+            surface_formats,
+            swapchain,
+            swapchain_format,
+            swapchain_extent,
+            swapchain_images,
+            swapchain_imageviews,
+            render_pass,
+            framebuffers,
+            graphics_pipeline,
+            pipeline_layout,
+            command_buffers,
+        ) = create_resolution_dependent_vulkan_state(
+            &window,
+            surface,
+            &gpu,
+            command_pool,
+            &ext_surface,
+            &ext_swapchain,
+        );
 
         VulkanApp {
             window,
@@ -842,6 +960,9 @@ impl VulkanApp {
             image_available_semaphores,
             render_finished_semaphores,
             command_buffer_complete_fences,
+            // - Surface capabilities and formats
+            surface_caps,
+            surface_formats,
             // - Swapchain
             swapchain,
             _swapchain_format: swapchain_format,
@@ -873,14 +994,25 @@ impl VulkanApp {
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
                 .expect("Failed to wait for Fence!");
 
-            self.ext_swapchain
-                .acquire_next_image(
-                    self.swapchain,
-                    std::u64::MAX,
-                    self.image_available_semaphores[self.current_frame],
-                    vk::Fence::null(),
-                )
-                .expect("Failed to acquire next image.")
+            let result = self.ext_swapchain.acquire_next_image(
+                self.swapchain,
+                std::u64::MAX,
+                self.image_available_semaphores[self.current_frame],
+                vk::Fence::null(),
+            );
+            match result {
+                Ok(image_idx) => image_idx,
+                Err(error_code) => {
+                    match error_code {
+                        vk::Result::ERROR_OUT_OF_DATE_KHR => {
+                            // Window is resized. Recreate the swapchain
+                            self.recreate_resolution_dependent_state();
+                            return;
+                        }
+                        _ => panic!("Failed to acquire swapchain image."),
+                    }
+                }
+            }
         };
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -928,10 +1060,22 @@ impl VulkanApp {
             p_results: ptr::null_mut(),
         };
 
-        unsafe {
-            self.ext_swapchain
-                .queue_present(self.gpu.present_queue, &present_info)
-                .expect("Failed to execute queue present.");
+        // Present the queue
+        {
+            let result = unsafe {
+                self.ext_swapchain
+                    .queue_present(self.gpu.present_queue, &present_info)
+            };
+
+            if let Err(error_code) = result {
+                match error_code {
+                    vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => {
+                        // Window is resized. Recreate the swapchain
+                        self.recreate_resolution_dependent_state();
+                    }
+                    _ => panic!("Failed to present queue."),
+                }
+            }
         }
 
         self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
@@ -959,23 +1103,8 @@ impl Drop for VulkanApp {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            for &framebuffer in self.framebuffers.iter() {
-                self.gpu.device.destroy_framebuffer(framebuffer, None);
-            }
+            self.destroy_resolution_dependent_state();
 
-            self.gpu
-                .device
-                .destroy_pipeline(self.graphics_pipeline, None);
-            self.gpu
-                .device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.gpu.device.destroy_render_pass(self.render_pass, None);
-
-            for &imageview in self.swapchain_imageviews.iter() {
-                self.gpu.device.destroy_image_view(imageview, None);
-            }
-
-            self.ext_swapchain.destroy_swapchain(self.swapchain, None);
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
 
