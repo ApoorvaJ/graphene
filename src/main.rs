@@ -380,7 +380,7 @@ fn create_resolution_dependent_vulkan_state(
         let rasterization_state_create_info = vk::PipelineRasterizationStateCreateInfo::builder()
             .polygon_mode(vk::PolygonMode::FILL)
             .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::CLOCKWISE) // TODO: Change to COUNTER_CLOCKWISE
+            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .line_width(1.0)
             .build();
 
