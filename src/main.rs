@@ -622,17 +622,12 @@ impl VulkanApp {
                 .map(|&imageview| {
                     let attachments = [imageview];
 
-                    let framebuffer_create_info = vk::FramebufferCreateInfo {
-                        s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
-                        p_next: ptr::null(),
-                        flags: vk::FramebufferCreateFlags::empty(),
-                        render_pass,
-                        attachment_count: attachments.len() as u32,
-                        p_attachments: attachments.as_ptr(),
-                        width: swapchain_extent.width,
-                        height: swapchain_extent.height,
-                        layers: 1,
-                    };
+                    let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+                        .render_pass(render_pass)
+                        .attachments(&attachments)
+                        .width(swapchain_extent.width)
+                        .height(swapchain_extent.height)
+                        .layers(1);
 
                     unsafe {
                         gpu.device
