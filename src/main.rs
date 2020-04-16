@@ -564,7 +564,7 @@ impl VulkanApp {
                     format: swapchain_format,
                     flags: vk::AttachmentDescriptionFlags::empty(),
                     samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::CLEAR, // TODO: DONT_CARE?
+                    load_op: vk::AttachmentLoadOp::DONT_CARE,
                     store_op: vk::AttachmentStoreOp::STORE,
                     stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
                     stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
@@ -926,21 +926,21 @@ impl VulkanApp {
             image_available_semaphores,
             render_finished_semaphores,
             command_buffer_complete_fences,
-            // - Commands
-            command_pool,
-            command_buffers,
             // - Swapchain
             swapchain,
             _swapchain_format: swapchain_format,
             _swapchain_extent: swapchain_extent,
             _swapchain_images: swapchain_images,
             swapchain_imageviews,
+            render_pass,
             framebuffers,
+            // - Commands
+            command_pool,
+            command_buffers,
 
             debug_messenger,
             validation_layers,
             pipeline_layout,
-            render_pass,
             graphics_pipeline,
 
             current_frame: 0,
