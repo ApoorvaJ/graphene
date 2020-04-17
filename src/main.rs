@@ -68,11 +68,12 @@ struct VulkanApp {
     ext_debug_utils: ash::extensions::ext::DebugUtils,
     ext_surface: ash::extensions::khr::Surface,
     ext_swapchain: ash::extensions::khr::Swapchain,
-    // - Device
+
     gpu: Gpu,
     command_pool: vk::CommandPool,
-    // - Resolution-dependent apparatus
-    apparatus: Apparatus,
+    vertex_buffer: vk::Buffer,
+    vertex_buffer_memory: vk::DeviceMemory,
+    apparatus: Apparatus, // Resolution-dependent apparatus
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
@@ -105,6 +106,7 @@ impl Apparatus {
         surface: vk::SurfaceKHR,
         gpu: &Gpu,
         command_pool: vk::CommandPool,
+        vertex_buffer: vk::Buffer,
         ext_surface: &ash::extensions::khr::Surface,
         ext_swapchain: &ash::extensions::khr::Swapchain,
     ) -> Apparatus {
@@ -328,11 +330,11 @@ impl Apparatus {
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
                 &gpu.device,
-                include_bytes!("../shaders/spv/09-shader-base.vert.spv").to_vec(),
+                include_bytes!("../shaders/spv/17-shader-vertexbuffer.vert.spv").to_vec(),
             );
             let frag_shader_module = create_shader_module(
                 &gpu.device,
-                include_bytes!("../shaders/spv/09-shader-base.frag.spv").to_vec(),
+                include_bytes!("../shaders/spv/17-shader-vertexbuffer.frag.spv").to_vec(),
             );
 
             let main_function_name = CString::new("main").unwrap();
@@ -350,8 +352,32 @@ impl Apparatus {
                     .build(),
             ];
 
-            let vertex_input_state_create_info =
-                vk::PipelineVertexInputStateCreateInfo::builder().build();
+            let vertex_input_state_create_info = {
+                // (pos: vec2 + color: vec3) = 5 floats * 4 bytes per float
+                const VERTEX_STRIDE: u32 = 20;
+                let binding_descriptions = [vk::VertexInputBindingDescription::builder()
+                    .binding(0)
+                    .stride(VERTEX_STRIDE)
+                    .build()];
+                let attribute_descriptions = [
+                    vk::VertexInputAttributeDescription::builder()
+                        .location(0)
+                        .binding(0)
+                        .format(vk::Format::R32G32_SFLOAT)
+                        .offset(0)
+                        .build(),
+                    vk::VertexInputAttributeDescription::builder()
+                        .location(1)
+                        .binding(0)
+                        .format(vk::Format::R32G32B32_SFLOAT)
+                        .offset(8)
+                        .build(),
+                ];
+                vk::PipelineVertexInputStateCreateInfo::builder()
+                    .vertex_binding_descriptions(&binding_descriptions)
+                    .vertex_attribute_descriptions(&attribute_descriptions)
+                    .build()
+            };
 
             let vertex_input_assembly_state_info =
                 vk::PipelineInputAssemblyStateCreateInfo::builder()
@@ -502,6 +528,12 @@ impl Apparatus {
                     vk::PipelineBindPoint::GRAPHICS,
                     graphics_pipeline,
                 );
+
+                let vertex_buffers = [vertex_buffer];
+                let offsets = [0_u64];
+                gpu.device
+                    .cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+
                 gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
 
                 gpu.device.cmd_end_render_pass(command_buffer);
@@ -610,6 +642,7 @@ impl VulkanApp {
             self.surface,
             &self.gpu,
             self.command_pool,
+            self.vertex_buffer,
             &self.ext_surface,
             &self.ext_swapchain,
         );
@@ -910,12 +943,90 @@ impl VulkanApp {
 
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
 
-        // Big call
+        // # Create the vertex buffer and allocate its memory
+        let (vertex_buffer, vertex_buffer_memory) = {
+            // vec2 position, vec3 color
+            const VERTICES_DATA: [f32; 15] = [
+                0.0, -0.5, 1.0, 0.0, 0.0, -0.5, 0.5, 0.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 0.0,
+            ];
+
+            let vertex_buffer_create_info = vk::BufferCreateInfo::builder()
+                .size(std::mem::size_of_val(&VERTICES_DATA) as u64)
+                .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+                .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+            let vertex_buffer = unsafe {
+                gpu.device
+                    .create_buffer(&vertex_buffer_create_info, None)
+                    .expect("Failed to create Vertex Buffer")
+            };
+
+            // TODO: Replace with allocator library?
+            let mem_requirements =
+                unsafe { gpu.device.get_buffer_memory_requirements(vertex_buffer) };
+            let mem_properties =
+                unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
+            let required_memory_flags: vk::MemoryPropertyFlags =
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+            // let memory_type = VulkanApp::find_memory_type(
+            //     mem_requirements.memory_type_bits,
+            //     required_memory_flags,
+            //     mem_properties,
+            // );
+            let memory_type = mem_properties
+                .memory_types
+                .iter()
+                .enumerate()
+                .position(|(i, &m)| {
+                    (mem_requirements.memory_type_bits & (1 << i)) > 0
+                        && m.property_flags.contains(required_memory_flags)
+                })
+                .expect("Failed to find suitable memory type.")
+                as u32;
+
+            let allocate_info = vk::MemoryAllocateInfo {
+                s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
+                p_next: ptr::null(),
+                allocation_size: mem_requirements.size,
+                memory_type_index: memory_type,
+            };
+
+            let vertex_buffer_memory = unsafe {
+                gpu.device
+                    .allocate_memory(&allocate_info, None)
+                    .expect("Failed to allocate vertex buffer memory!")
+            };
+
+            unsafe {
+                gpu.device
+                    .bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0)
+                    .expect("Failed to bind Buffer");
+
+                let data_ptr = gpu
+                    .device
+                    .map_memory(
+                        vertex_buffer_memory,
+                        0,
+                        vertex_buffer_create_info.size,
+                        vk::MemoryMapFlags::empty(),
+                    )
+                    .expect("Failed to Map Memory") as *mut f32;
+
+                data_ptr.copy_from_nonoverlapping(VERTICES_DATA.as_ptr(), VERTICES_DATA.len());
+
+                gpu.device.unmap_memory(vertex_buffer_memory);
+            }
+
+            (vertex_buffer, vertex_buffer_memory)
+        };
+
+        // # Set up the apparatus
         let apparatus = Apparatus::new(
             &window,
             surface,
             &gpu,
             command_pool,
+            vertex_buffer,
             &ext_surface,
             &ext_swapchain,
         );
@@ -932,6 +1043,8 @@ impl VulkanApp {
             // - Device
             gpu,
             command_pool,
+            vertex_buffer,
+            vertex_buffer_memory,
             // - Resolution-dependent apparatus
             apparatus,
 
@@ -1048,6 +1161,9 @@ impl Drop for VulkanApp {
                 .destroy_command_pool(self.command_pool, None);
 
             self.apparatus.destroy(&self.gpu, &self.ext_swapchain);
+
+            self.gpu.device.destroy_buffer(self.vertex_buffer, None);
+            self.gpu.device.free_memory(self.vertex_buffer_memory, None);
 
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
