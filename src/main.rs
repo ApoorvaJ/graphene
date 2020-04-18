@@ -561,9 +561,15 @@ impl VulkanApp {
 
         // # Create and upload the vertex buffer
         let (vertex_buffer, vertex_buffer_memory) = {
-            const VERTICES_DATA: [f32; 20] = [
-                -0.75, -0.75, 0.0, 0.0, 0.0, 0.75, -0.75, 1.0, 0.0, 0.0, 0.75, 0.75, 1.0, 1.0, 0.0,
-                -0.75, 0.75, 0.0, 1.0, 0.0,
+            const VERTICES_DATA: [f32; 24] = [
+                -0.75, -0.75, 0.0,
+                0.0, 0.0, 0.0,
+                0.75, -0.75, 0.0,
+                1.0, 0.0, 0.0,
+                0.75, 0.75, 0.0,
+                1.0, 1.0, 0.0,
+                -0.75, 0.75, 0.0,
+                0.0, 1.0, 0.0,
             ];
             new_buffer(
                 &VERTICES_DATA,

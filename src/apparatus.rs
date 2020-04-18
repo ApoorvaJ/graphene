@@ -259,11 +259,11 @@ impl Apparatus {
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
                 &gpu.device,
-                include_bytes!("../shaders/spv/21-shader-ubo.vert.spv").to_vec(),
+                include_bytes!("../shaders/spv/default.vert.spv").to_vec(),
             );
             let frag_shader_module = create_shader_module(
                 &gpu.device,
-                include_bytes!("../shaders/spv/21-shader-ubo.frag.spv").to_vec(),
+                include_bytes!("../shaders/spv/default.frag.spv").to_vec(),
             );
 
             let main_function_name = CString::new("main").unwrap();
@@ -283,8 +283,8 @@ impl Apparatus {
                 },
             ];
 
-            // (pos: vec2 + color: vec3) = 5 floats * 4 bytes per float
-            const VERTEX_STRIDE: u32 = 20;
+            // (pos: vec3 + color: vec3) = 6 floats * 4 bytes per float
+            const VERTEX_STRIDE: u32 = 24;
             let binding_descriptions = [vk::VertexInputBindingDescription {
                 binding: 0,
                 stride: VERTEX_STRIDE,
@@ -294,14 +294,14 @@ impl Apparatus {
                 vk::VertexInputAttributeDescription {
                     location: 0,
                     binding: 0,
-                    format: vk::Format::R32G32_SFLOAT,
+                    format: vk::Format::R32G32B32_SFLOAT,
                     offset: 0,
                 },
                 vk::VertexInputAttributeDescription {
                     location: 1,
                     binding: 0,
                     format: vk::Format::R32G32B32_SFLOAT,
-                    offset: 8,
+                    offset: 12,
                 },
             ];
             let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
