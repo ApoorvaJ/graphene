@@ -16,7 +16,7 @@ use std::ptr;
 // Constants
 const NUM_FRAMES: usize = 2;
 
-struct Gpu {
+pub struct Gpu {
     // Physical device
     physical_device: vk::PhysicalDevice,
     _exts: Vec<vk::ExtensionProperties>,
@@ -80,6 +80,165 @@ struct VulkanApp {
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
     current_frame: usize,
+}
+
+fn create_buffer(
+    gpu: &Gpu,
+    size: vk::DeviceSize,
+    usage: vk::BufferUsageFlags,
+    required_memory_properties: vk::MemoryPropertyFlags,
+    device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+) -> (vk::Buffer, vk::DeviceMemory) {
+    let device = &gpu.device;
+    // Create buffer
+    let buffer_create_info = vk::BufferCreateInfo::builder()
+        .size(size)
+        .usage(usage)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+    let buffer = unsafe {
+        device
+            .create_buffer(&buffer_create_info, None)
+            .expect("Failed to create vertex buffer.")
+    };
+    // Locate memory type
+    let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+    let memory_type_index = device_memory_properties
+        .memory_types
+        .iter()
+        .enumerate()
+        .position(|(i, &m)| {
+            (mem_requirements.memory_type_bits & (1 << i)) > 0
+                && m.property_flags.contains(required_memory_properties)
+        })
+        .expect("Failed to find suitable memory type.") as u32;
+    // Allocate memory
+    // TODO: Replace with allocator library?
+    let allocate_info = vk::MemoryAllocateInfo::builder()
+        .allocation_size(mem_requirements.size)
+        .memory_type_index(memory_type_index);
+
+    let buffer_memory = unsafe {
+        device
+            .allocate_memory(&allocate_info, None)
+            .expect("Failed to allocate vertex buffer memory.")
+    };
+    // Bind memory to buffer
+    unsafe {
+        device
+            .bind_buffer_memory(buffer, buffer_memory, 0)
+            .expect("Failed to bind Buffer.");
+    }
+
+    (buffer, buffer_memory)
+}
+
+pub fn new_buffer<T>(
+    data: &[T],
+    usage: vk::BufferUsageFlags,
+    gpu: &Gpu,
+    instance: &ash::Instance,
+    command_pool: vk::CommandPool,
+) -> (vk::Buffer, vk::DeviceMemory) {
+    let buffer_size = std::mem::size_of_val(data) as vk::DeviceSize;
+    let device_memory_properties =
+        unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
+
+    // ## Create staging buffer in host-visible memory
+    // TODO: Replace with allocator library?
+    let (staging_buffer, staging_buffer_memory) = create_buffer(
+        &gpu,
+        buffer_size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        &device_memory_properties,
+    );
+    // ## Copy data to staging buffer
+    unsafe {
+        let data_ptr = gpu
+            .device
+            .map_memory(
+                staging_buffer_memory,
+                0,
+                buffer_size,
+                vk::MemoryMapFlags::empty(),
+            )
+            .expect("Failed to map memory.") as *mut T;
+
+        data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
+        gpu.device.unmap_memory(staging_buffer_memory);
+    }
+    // ## Create buffer in device-local memory
+    // TODO: Replace with allocator library?
+    let (buffer, buffer_memory) = create_buffer(
+        &gpu,
+        buffer_size,
+        vk::BufferUsageFlags::TRANSFER_DST | usage,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        &device_memory_properties,
+    );
+
+    // ## Copy staging buffer -> vertex buffer
+    {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let command_buffers = unsafe {
+            gpu.device
+                .allocate_command_buffers(&allocate_info)
+                .expect("Failed to allocate command buffer.")
+        };
+        let command_buffer = command_buffers[0];
+
+        let begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+        unsafe {
+            gpu.device
+                .begin_command_buffer(command_buffer, &begin_info)
+                .expect("Failed to begin command buffer.");
+
+            let copy_regions = [vk::BufferCopy {
+                src_offset: 0,
+                dst_offset: 0,
+                size: buffer_size,
+            }];
+
+            gpu.device
+                .cmd_copy_buffer(command_buffer, staging_buffer, buffer, &copy_regions);
+
+            gpu.device
+                .end_command_buffer(command_buffer)
+                .expect("Failed to end command buffer");
+        }
+
+        let submit_info = [vk::SubmitInfo {
+            command_buffer_count: command_buffers.len() as u32,
+            p_command_buffers: command_buffers.as_ptr(),
+            ..Default::default()
+        }];
+
+        unsafe {
+            gpu.device
+                .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
+                .expect("Failed to Submit Queue.");
+            gpu.device
+                .queue_wait_idle(gpu.graphics_queue)
+                .expect("Failed to wait Queue idle");
+
+            gpu.device
+                .free_command_buffers(command_pool, &command_buffers);
+        }
+    }
+
+    unsafe {
+        gpu.device.destroy_buffer(staging_buffer, None);
+        gpu.device.free_memory(staging_buffer_memory, None);
+    }
+
+    (buffer, buffer_memory)
 }
 
 // This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`
@@ -368,14 +527,12 @@ impl Apparatus {
                     binding: 0,
                     format: vk::Format::R32G32_SFLOAT,
                     offset: 0,
-                    ..Default::default()
                 },
                 vk::VertexInputAttributeDescription {
                     location: 1,
                     binding: 0,
                     format: vk::Format::R32G32B32_SFLOAT,
                     offset: 8,
-                    ..Default::default()
                 },
             ];
             let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
@@ -971,218 +1128,25 @@ impl VulkanApp {
                 -0.75, -0.75, 0.0, 0.0, 0.0, 0.75, -0.75, 1.0, 0.0, 0.0, 0.75, 0.75, 1.0, 1.0, 0.0,
                 -0.75, 0.75, 0.0, 1.0, 0.0,
             ];
-
-            let buffer_size = std::mem::size_of_val(&VERTICES_DATA) as vk::DeviceSize;
-            let device_memory_properties =
-                unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
-
-            // ## Create staging buffer in host-visible memory
-            // TODO: Replace with allocator library?
-            let (staging_buffer, staging_buffer_memory) = VulkanApp::create_buffer(
-                &gpu.device,
-                buffer_size,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                &device_memory_properties,
-            );
-            // ## Copy data to staging buffer
-            unsafe {
-                let data_ptr = gpu
-                    .device
-                    .map_memory(
-                        staging_buffer_memory,
-                        0,
-                        buffer_size,
-                        vk::MemoryMapFlags::empty(),
-                    )
-                    .expect("Failed to map memory.") as *mut f32;
-
-                data_ptr.copy_from_nonoverlapping(VERTICES_DATA.as_ptr(), VERTICES_DATA.len());
-                gpu.device.unmap_memory(staging_buffer_memory);
-            }
-            // ## Create vertex buffer in device-local memory
-            // TODO: Replace with allocator library?
-            let (vertex_buffer, vertex_buffer_memory) = VulkanApp::create_buffer(
-                &gpu.device,
-                buffer_size,
-                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                &device_memory_properties,
-            );
-
-            // ## Copy staging buffer -> vertex buffer
-            {
-                let allocate_info = vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(command_pool)
-                    .level(vk::CommandBufferLevel::PRIMARY)
-                    .command_buffer_count(1);
-
-                let command_buffers = unsafe {
-                    gpu.device
-                        .allocate_command_buffers(&allocate_info)
-                        .expect("Failed to allocate command buffer.")
-                };
-                let command_buffer = command_buffers[0];
-
-                let begin_info = vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-                unsafe {
-                    gpu.device
-                        .begin_command_buffer(command_buffer, &begin_info)
-                        .expect("Failed to begin command buffer.");
-
-                    let copy_regions = [vk::BufferCopy {
-                        src_offset: 0,
-                        dst_offset: 0,
-                        size: buffer_size,
-                    }];
-
-                    gpu.device.cmd_copy_buffer(
-                        command_buffer,
-                        staging_buffer,
-                        vertex_buffer,
-                        &copy_regions,
-                    );
-
-                    gpu.device
-                        .end_command_buffer(command_buffer)
-                        .expect("Failed to end command buffer");
-                }
-
-                let submit_info = [vk::SubmitInfo {
-                    command_buffer_count: command_buffers.len() as u32,
-                    p_command_buffers: command_buffers.as_ptr(),
-                    ..Default::default()
-                }];
-
-                unsafe {
-                    gpu.device
-                        .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
-                        .expect("Failed to Submit Queue.");
-                    gpu.device
-                        .queue_wait_idle(gpu.graphics_queue)
-                        .expect("Failed to wait Queue idle");
-
-                    gpu.device
-                        .free_command_buffers(command_pool, &command_buffers);
-                }
-            }
-
-            unsafe {
-                gpu.device.destroy_buffer(staging_buffer, None);
-                gpu.device.free_memory(staging_buffer_memory, None);
-            }
-
-            (vertex_buffer, vertex_buffer_memory)
+            new_buffer(
+                &VERTICES_DATA,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                &gpu,
+                &instance,
+                command_pool,
+            )
         };
 
         let (index_buffer, index_buffer_memory) = {
             const INDICES_DATA: [u32; 6] = [0, 2, 1, 2, 0, 3];
 
-            let buffer_size = std::mem::size_of_val(&INDICES_DATA) as vk::DeviceSize;
-            let device_memory_properties =
-                unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
-
-            // ## Create staging buffer in host-visible memory
-            // TODO: Replace with allocator library?
-            let (staging_buffer, staging_buffer_memory) = VulkanApp::create_buffer(
-                &gpu.device,
-                buffer_size,
-                vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                &device_memory_properties,
-            );
-            // ## Copy data to staging buffer
-            unsafe {
-                let data_ptr = gpu
-                    .device
-                    .map_memory(
-                        staging_buffer_memory,
-                        0,
-                        buffer_size,
-                        vk::MemoryMapFlags::empty(),
-                    )
-                    .expect("Failed to map memory.") as *mut u32;
-
-                data_ptr.copy_from_nonoverlapping(INDICES_DATA.as_ptr(), INDICES_DATA.len());
-                gpu.device.unmap_memory(staging_buffer_memory);
-            }
-            // ## Create buffer in device-local memory
-            // TODO: Replace with allocator library?
-            let (index_buffer, index_buffer_memory) = VulkanApp::create_buffer(
-                &gpu.device,
-                buffer_size,
-                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                &device_memory_properties,
-            );
-
-            // ## Copy staging buffer -> vertex buffer
-            {
-                let allocate_info = vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(command_pool)
-                    .level(vk::CommandBufferLevel::PRIMARY)
-                    .command_buffer_count(1);
-
-                let command_buffers = unsafe {
-                    gpu.device
-                        .allocate_command_buffers(&allocate_info)
-                        .expect("Failed to allocate command buffer.")
-                };
-                let command_buffer = command_buffers[0];
-
-                let begin_info = vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-                unsafe {
-                    gpu.device
-                        .begin_command_buffer(command_buffer, &begin_info)
-                        .expect("Failed to begin command buffer.");
-
-                    let copy_regions = [vk::BufferCopy {
-                        src_offset: 0,
-                        dst_offset: 0,
-                        size: buffer_size,
-                    }];
-
-                    gpu.device.cmd_copy_buffer(
-                        command_buffer,
-                        staging_buffer,
-                        index_buffer,
-                        &copy_regions,
-                    );
-
-                    gpu.device
-                        .end_command_buffer(command_buffer)
-                        .expect("Failed to end command buffer");
-                }
-
-                let submit_info = [vk::SubmitInfo {
-                    command_buffer_count: command_buffers.len() as u32,
-                    p_command_buffers: command_buffers.as_ptr(),
-                    ..Default::default()
-                }];
-
-                unsafe {
-                    gpu.device
-                        .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
-                        .expect("Failed to Submit Queue.");
-                    gpu.device
-                        .queue_wait_idle(gpu.graphics_queue)
-                        .expect("Failed to wait Queue idle");
-
-                    gpu.device
-                        .free_command_buffers(command_pool, &command_buffers);
-                }
-            }
-
-            unsafe {
-                gpu.device.destroy_buffer(staging_buffer, None);
-                gpu.device.free_memory(staging_buffer_memory, None);
-            }
-
-            (index_buffer, index_buffer_memory)
+            new_buffer(
+                &INDICES_DATA,
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                &gpu,
+                &instance,
+                command_pool,
+            )
         };
 
         // # Set up the apparatus
@@ -1221,56 +1185,6 @@ impl VulkanApp {
 
             current_frame: 0,
         }
-    }
-
-    fn create_buffer(
-        device: &ash::Device,
-        size: vk::DeviceSize,
-        usage: vk::BufferUsageFlags,
-        required_memory_properties: vk::MemoryPropertyFlags,
-        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-    ) -> (vk::Buffer, vk::DeviceMemory) {
-        // Create buffer
-        let buffer_create_info = vk::BufferCreateInfo::builder()
-            .size(size)
-            .usage(usage)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE);
-
-        let buffer = unsafe {
-            device
-                .create_buffer(&buffer_create_info, None)
-                .expect("Failed to create vertex buffer.")
-        };
-        // Locate memory type
-        let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-        let memory_type_index = device_memory_properties
-            .memory_types
-            .iter()
-            .enumerate()
-            .position(|(i, &m)| {
-                (mem_requirements.memory_type_bits & (1 << i)) > 0
-                    && m.property_flags.contains(required_memory_properties)
-            })
-            .expect("Failed to find suitable memory type.") as u32;
-        // Allocate memory
-        // TODO: Replace with allocator library?
-        let allocate_info = vk::MemoryAllocateInfo::builder()
-            .allocation_size(mem_requirements.size)
-            .memory_type_index(memory_type_index);
-
-        let buffer_memory = unsafe {
-            device
-                .allocate_memory(&allocate_info, None)
-                .expect("Failed to allocate vertex buffer memory.")
-        };
-        // Bind memory to buffer
-        unsafe {
-            device
-                .bind_buffer_memory(buffer, buffer_memory, 0)
-                .expect("Failed to bind Buffer.");
-        }
-
-        (buffer, buffer_memory)
     }
 
     fn draw_frame(&mut self) {
