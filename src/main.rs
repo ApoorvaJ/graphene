@@ -352,31 +352,30 @@ impl Apparatus {
                     .build(),
             ];
 
-            let vertex_input_state_create_info = {
-                // (pos: vec2 + color: vec3) = 5 floats * 4 bytes per float
-                const VERTEX_STRIDE: u32 = 20;
-                let binding_descriptions = [vk::VertexInputBindingDescription::builder()
+            // (pos: vec2 + color: vec3) = 5 floats * 4 bytes per float
+            const VERTEX_STRIDE: u32 = 20;
+            let binding_descriptions = [vk::VertexInputBindingDescription::builder()
+                .binding(0)
+                .stride(VERTEX_STRIDE)
+                .build()];
+            let attribute_descriptions = [
+                vk::VertexInputAttributeDescription::builder()
+                    .location(0)
                     .binding(0)
-                    .stride(VERTEX_STRIDE)
-                    .build()];
-                let attribute_descriptions = [
-                    vk::VertexInputAttributeDescription::builder()
-                        .location(0)
-                        .binding(0)
-                        .format(vk::Format::R32G32_SFLOAT)
-                        .offset(0)
-                        .build(),
-                    vk::VertexInputAttributeDescription::builder()
-                        .location(1)
-                        .binding(0)
-                        .format(vk::Format::R32G32B32_SFLOAT)
-                        .offset(8)
-                        .build(),
-                ];
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(0)
+                    .build(),
+                vk::VertexInputAttributeDescription::builder()
+                    .location(1)
+                    .binding(0)
+                    .format(vk::Format::R32G32B32_SFLOAT)
+                    .offset(8)
+                    .build(),
+            ];
+            let vertex_input_state_create_info = {
                 vk::PipelineVertexInputStateCreateInfo::builder()
                     .vertex_binding_descriptions(&binding_descriptions)
                     .vertex_attribute_descriptions(&attribute_descriptions)
-                    .build()
             };
 
             let vertex_input_assembly_state_info =
