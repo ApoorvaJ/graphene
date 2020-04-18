@@ -912,6 +912,13 @@ impl VulkanApp {
         event_loop.run(move |event, _, control_flow| match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::Resized(physical_size) => {
+                    if self.apparatus.swapchain_extent.width != physical_size.width ||
+                        self.apparatus.swapchain_extent.height != physical_size.height
+                    {
+                        self.recreate_resolution_dependent_state();
+                    }
+                },
                 WindowEvent::KeyboardInput { input, .. } => match input {
                     KeyboardInput {
                         virtual_keycode,
