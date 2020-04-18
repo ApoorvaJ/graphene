@@ -283,18 +283,16 @@ impl Apparatus {
             //     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             // };
 
-            let subpasses = [vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&color_attachment_ref)
-                // .depth_stencil_attachment(&depth_attachment_ref)
-                .build()];
-
-            // TODO: Subpass dependencies
+            let subpasses = [vk::SubpassDescription {
+                pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
+                color_attachment_count: 1,
+                p_color_attachments: color_attachment_ref.as_ptr(),
+                ..Default::default()
+            }];
 
             let renderpass_create_info = vk::RenderPassCreateInfo::builder()
                 .attachments(&attachments)
                 .subpasses(&subpasses);
-            // TODO: .dependencies(...);
 
             unsafe {
                 gpu.device
@@ -340,48 +338,56 @@ impl Apparatus {
             let main_function_name = CString::new("main").unwrap();
 
             let shader_stages = [
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::VERTEX)
-                    .module(vert_shader_module)
-                    .name(&main_function_name)
-                    .build(),
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::FRAGMENT)
-                    .module(frag_shader_module)
-                    .name(&main_function_name)
-                    .build(),
+                vk::PipelineShaderStageCreateInfo {
+                    stage: vk::ShaderStageFlags::VERTEX,
+                    module: vert_shader_module,
+                    p_name: main_function_name.as_ptr(),
+                    ..Default::default()
+                },
+                vk::PipelineShaderStageCreateInfo {
+                    stage: vk::ShaderStageFlags::FRAGMENT,
+                    module: frag_shader_module,
+                    p_name: main_function_name.as_ptr(),
+                    ..Default::default()
+                },
             ];
 
             // (pos: vec2 + color: vec3) = 5 floats * 4 bytes per float
             const VERTEX_STRIDE: u32 = 20;
-            let binding_descriptions = [vk::VertexInputBindingDescription::builder()
-                .binding(0)
-                .stride(VERTEX_STRIDE)
-                .build()];
+            let binding_descriptions = [vk::VertexInputBindingDescription {
+                binding: 0,
+                stride: VERTEX_STRIDE,
+                ..Default::default()
+            }];
             let attribute_descriptions = [
-                vk::VertexInputAttributeDescription::builder()
-                    .location(0)
-                    .binding(0)
-                    .format(vk::Format::R32G32_SFLOAT)
-                    .offset(0)
-                    .build(),
-                vk::VertexInputAttributeDescription::builder()
-                    .location(1)
-                    .binding(0)
-                    .format(vk::Format::R32G32B32_SFLOAT)
-                    .offset(8)
-                    .build(),
+                vk::VertexInputAttributeDescription {
+                    location: 0,
+                    binding: 0,
+                    format: vk::Format::R32G32_SFLOAT,
+                    offset: 0,
+                    ..Default::default()
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 1,
+                    binding: 0,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: 8,
+                    ..Default::default()
+                },
             ];
-            let vertex_input_state_create_info = {
-                vk::PipelineVertexInputStateCreateInfo::builder()
-                    .vertex_binding_descriptions(&binding_descriptions)
-                    .vertex_attribute_descriptions(&attribute_descriptions)
+            let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
+                vertex_binding_description_count: binding_descriptions.len() as u32,
+                p_vertex_binding_descriptions: binding_descriptions.as_ptr(),
+                vertex_attribute_description_count: attribute_descriptions.len() as u32,
+                p_vertex_attribute_descriptions: attribute_descriptions.as_ptr(),
+                ..Default::default()
             };
 
             let vertex_input_assembly_state_info =
-                vk::PipelineInputAssemblyStateCreateInfo::builder()
-                    .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-                    .build();
+                vk::PipelineInputAssemblyStateCreateInfo{
+                    topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                    ..Default::default()
+                };
 
             let viewports = [vk::Viewport {
                 x: 0.0,
@@ -397,26 +403,31 @@ impl Apparatus {
                 extent: swapchain_extent,
             }];
 
-            let viewport_state_create_info = vk::PipelineViewportStateCreateInfo::builder()
-                .scissors(&scissors)
-                .viewports(&viewports)
-                .build();
+            let viewport_state_create_info = vk::PipelineViewportStateCreateInfo {
+                scissor_count: scissors.len() as u32,
+                p_scissors: scissors.as_ptr(),
+                viewport_count: viewports.len() as u32,
+                p_viewports: viewports.as_ptr(),
+                ..Default::default()
+            };
 
-            let rasterization_state_create_info =
-                vk::PipelineRasterizationStateCreateInfo::builder()
-                    .polygon_mode(vk::PolygonMode::FILL)
-                    .cull_mode(vk::CullModeFlags::BACK)
-                    .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-                    .line_width(1.0)
-                    .build();
+            let rasterization_state_create_info = vk::PipelineRasterizationStateCreateInfo {
+                polygon_mode: vk::PolygonMode::FILL,
+                cull_mode: vk::CullModeFlags::BACK,
+                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                line_width: 1.0,
+                ..Default::default()
+            };
 
-            let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo::builder()
-                .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-                .build();
+            let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo {
+                rasterization_samples: vk::SampleCountFlags::TYPE_1,
+                ..Default::default()
+            };
 
             // TODO: Depth
-            let depth_state_create_info =
-                vk::PipelineDepthStencilStateCreateInfo::builder().build();
+            let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
+                ..Default::default()
+            };
 
             let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
                 blend_enable: vk::FALSE,
@@ -429,10 +440,12 @@ impl Apparatus {
                 alpha_blend_op: vk::BlendOp::ADD,
             }];
 
-            let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-                .attachments(&color_blend_attachment_states)
-                .blend_constants([0.0, 0.0, 0.0, 0.0])
-                .build();
+            let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
+                attachment_count: color_blend_attachment_states.len() as u32,
+                p_attachments: color_blend_attachment_states.as_ptr(),
+                blend_constants: [0.0, 0.0, 0.0, 0.0],
+                ..Default::default()
+            };
 
             let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::builder();
 
@@ -442,21 +455,23 @@ impl Apparatus {
                     .expect("Failed to create pipeline layout.")
             };
 
-            let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo::builder()
-                .stages(&shader_stages)
-                .vertex_input_state(&vertex_input_state_create_info)
-                .input_assembly_state(&vertex_input_assembly_state_info)
-                // Skip tesselation
-                .viewport_state(&viewport_state_create_info)
-                .rasterization_state(&rasterization_state_create_info)
-                .multisample_state(&multisample_state_create_info)
-                .depth_stencil_state(&depth_state_create_info)
-                .color_blend_state(&color_blend_state)
-                // No dynamic state
-                .layout(pipeline_layout)
-                .render_pass(render_pass)
-                .subpass(0)
-                .build()];
+            let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo{
+                stage_count: shader_stages.len() as u32,
+                p_stages: shader_stages.as_ptr(),
+                p_vertex_input_state: &vertex_input_state_create_info,
+                p_input_assembly_state: &vertex_input_assembly_state_info,
+                p_tessellation_state: ptr::null(),
+                p_viewport_state: &viewport_state_create_info,
+                p_rasterization_state: &rasterization_state_create_info,
+                p_multisample_state: &multisample_state_create_info,
+                p_depth_stencil_state: &depth_state_create_info,
+                p_color_blend_state: &color_blend_state,
+                p_dynamic_state: ptr::null(), // No dynamic state
+                layout: pipeline_layout,
+                render_pass,
+                subpass: 0,
+                ..Default::default()
+            }];
 
             let graphics_pipelines = unsafe {
                 gpu.device
@@ -674,8 +689,7 @@ impl VulkanApp {
                 .application_version(vk_make_version!(1, 0, 0))
                 .engine_name(&engine_name)
                 .engine_version(vk_make_version!(1, 0, 0))
-                .api_version(vk_make_version!(1, 0, 92))
-                .build();
+                .api_version(vk_make_version!(1, 0, 92));
 
             // Ensure that all desired validation layers are available
             if !validation_layers.is_empty() {
@@ -1025,9 +1039,13 @@ impl VulkanApp {
                         .expect("Failed to end command buffer");
                 }
 
-                let submit_info = [vk::SubmitInfo::builder()
-                    .command_buffers(&command_buffers)
-                    .build()];
+                let submit_info = [
+                    vk::SubmitInfo {
+                        command_buffer_count: command_buffers.len() as u32,
+                        p_command_buffers: command_buffers.as_ptr(),
+                        ..Default::default()
+                    }
+                ];
 
                 unsafe {
                     gpu.device
@@ -1171,12 +1189,18 @@ impl VulkanApp {
         let signal_semaphores = [self.apparatus.render_finished_semaphores[self.current_frame]];
         let command_buffers = [self.apparatus.command_buffers[image_index as usize]];
 
-        let submit_infos = [vk::SubmitInfo::builder()
-            .wait_semaphores(&wait_semaphores)
-            .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(&command_buffers)
-            .signal_semaphores(&signal_semaphores)
-            .build()];
+        let submit_infos = [
+            vk::SubmitInfo {
+                wait_semaphore_count: wait_semaphores.len() as u32,
+                p_wait_semaphores: wait_semaphores.as_ptr(),
+                p_wait_dst_stage_mask: wait_stages.as_ptr(),
+                command_buffer_count: command_buffers.len() as u32,
+                p_command_buffers: command_buffers.as_ptr(),
+                signal_semaphore_count: signal_semaphores.len() as u32,
+                p_signal_semaphores: signal_semaphores.as_ptr(),
+                ..Default::default()
+            }
+        ];
 
         unsafe {
             self.gpu
