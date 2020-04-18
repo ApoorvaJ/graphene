@@ -504,7 +504,7 @@ impl Apparatus {
                     );
                 }
 
-                gpu.device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
+                gpu.device.cmd_draw_indexed(command_buffer, 18, 1, 0, 0, 0);
 
                 gpu.device.cmd_end_render_pass(command_buffer);
 

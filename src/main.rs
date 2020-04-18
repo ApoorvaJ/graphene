@@ -12,13 +12,14 @@ use glam::*;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
+use std::f32::consts::PI;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr;
-// use std::f32::consts::PI;
 
 // Constants
 const NUM_FRAMES: usize = 2;
+const DEGREES_TO_RADIANS: f32 = PI / 180.0;
 
 pub struct Gpu {
     // Physical device
@@ -561,15 +562,10 @@ impl VulkanApp {
 
         // # Create and upload the vertex buffer
         let (vertex_buffer, vertex_buffer_memory) = {
-            const VERTICES_DATA: [f32; 24] = [
-                -0.75, -0.75, 0.0,
-                0.0, 0.0, 0.0,
-                0.75, -0.75, 0.0,
-                1.0, 0.0, 0.0,
-                0.75, 0.75, 0.0,
-                1.0, 1.0, 0.0,
-                -0.75, 0.75, 0.0,
-                0.0, 1.0, 0.0,
+            const VERTICES_DATA: [f32; 42] = [
+                -4.0, -4.0, -4.0, 0.0, 0.0, 0.0, 4.0, -4.0, -4.0, 1.0, 0.0, 0.0, 4.0, 4.0, -4.0,
+                1.0, 1.0, 0.0, -4.0, 4.0, -4.0, 0.0, 1.0, 0.0, 4.0, -4.0, 4.0, 1.0, 0.0, 1.0, 4.0,
+                4.0, 4.0, 1.0, 1.0, 1.0, -4.0, -4.0, 4.0, 0.0, 0.0, 1.0,
             ];
             new_buffer(
                 &VERTICES_DATA,
@@ -581,7 +577,7 @@ impl VulkanApp {
 
         // # Create and upload index buffer
         let (index_buffer, index_buffer_memory) = {
-            const INDICES_DATA: [u32; 6] = [0, 2, 1, 2, 0, 3];
+            const INDICES_DATA: [u32; 18] = [0, 2, 1, 2, 0, 3, 4, 1, 2, 4, 0, 1, 5, 4, 2, 6, 0, 4];
 
             new_buffer(
                 &INDICES_DATA,
@@ -771,9 +767,16 @@ impl VulkanApp {
 
         // Update uniform buffer
         {
-            // let extent = &self.apparatus.swapchain_extent;
+            let extent = &self.apparatus.swapchain_extent;
             let ubos = [UniformBuffer {
-                mtx_world_to_clip: Mat4::from_scale(Vec3::new(0.5, 1.0, 1.0)),
+                mtx_world_to_clip: Mat4::perspective_lh(
+                    60.0 * DEGREES_TO_RADIANS,
+                    extent.width as f32 / extent.height as f32,
+                    0.01,
+                    100.0,
+                ) * Mat4::from_translation(Vec3::new(0.0, 0.0, 18.0))
+                    * Mat4::from_rotation_x(30.0 * DEGREES_TO_RADIANS)
+                    * Mat4::from_rotation_y(45.0 * DEGREES_TO_RADIANS),
             }];
 
             let buffer_size = (std::mem::size_of::<UniformBuffer>() * ubos.len()) as u64;
