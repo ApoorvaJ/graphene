@@ -96,7 +96,7 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
     unsafe {
         device
             .create_shader_module(&shader_module_create_info, None)
-            .expect("Failed to create Shader Module!")
+            .expect("Failed to create shader module.")
     }
 }
 
@@ -198,13 +198,13 @@ impl Apparatus {
             let swapchain = unsafe {
                 ext_swapchain
                     .create_swapchain(&info, None)
-                    .expect("Failed to create Swapchain!")
+                    .expect("Failed to create swapchain.")
             };
 
             let images = unsafe {
                 ext_swapchain
                     .get_swapchain_images(swapchain)
-                    .expect("Failed to get Swapchain Images.")
+                    .expect("Failed to get swapchain images.")
             };
 
             (swapchain, swapchain_format, extent, images)
@@ -945,76 +945,107 @@ impl VulkanApp {
 
         // # Create the vertex buffer and allocate its memory
         let (vertex_buffer, vertex_buffer_memory) = {
-            // vec2 position, vec3 color
             const VERTICES_DATA: [f32; 15] = [
                 0.0, -0.5, 1.0, 0.0, 0.0, -0.5, 0.5, 0.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 0.0,
             ];
-
-            let vertex_buffer_create_info = vk::BufferCreateInfo::builder()
-                .size(std::mem::size_of_val(&VERTICES_DATA) as u64)
-                .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                .sharing_mode(vk::SharingMode::EXCLUSIVE);
-
-            let vertex_buffer = unsafe {
-                gpu.device
-                    .create_buffer(&vertex_buffer_create_info, None)
-                    .expect("Failed to create Vertex Buffer")
-            };
-
-            // TODO: Replace with allocator library?
-            let mem_requirements =
-                unsafe { gpu.device.get_buffer_memory_requirements(vertex_buffer) };
-            let mem_properties =
+            let buffer_size = std::mem::size_of_val(&VERTICES_DATA) as vk::DeviceSize;
+            let device_memory_properties =
                 unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
-            let required_memory_flags: vk::MemoryPropertyFlags =
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
-            // let memory_type = VulkanApp::find_memory_type(
-            //     mem_requirements.memory_type_bits,
-            //     required_memory_flags,
-            //     mem_properties,
-            // );
-            let memory_type = mem_properties
-                .memory_types
-                .iter()
-                .enumerate()
-                .position(|(i, &m)| {
-                    (mem_requirements.memory_type_bits & (1 << i)) > 0
-                        && m.property_flags.contains(required_memory_flags)
-                })
-                .expect("Failed to find suitable memory type.")
-                as u32;
 
-            let allocate_info = vk::MemoryAllocateInfo {
-                s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
-                p_next: ptr::null(),
-                allocation_size: mem_requirements.size,
-                memory_type_index: memory_type,
-            };
-
-            let vertex_buffer_memory = unsafe {
-                gpu.device
-                    .allocate_memory(&allocate_info, None)
-                    .expect("Failed to allocate vertex buffer memory!")
-            };
-
+            // ## Create staging buffer in host-visible memory
+            // TODO: Replace with allocator library?
+            let (staging_buffer, staging_buffer_memory) = VulkanApp::create_buffer(
+                &gpu.device,
+                buffer_size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                &device_memory_properties,
+            );
+            // ## Copy data to staging buffer
             unsafe {
-                gpu.device
-                    .bind_buffer_memory(vertex_buffer, vertex_buffer_memory, 0)
-                    .expect("Failed to bind Buffer");
-
                 let data_ptr = gpu
                     .device
                     .map_memory(
-                        vertex_buffer_memory,
+                        staging_buffer_memory,
                         0,
-                        vertex_buffer_create_info.size,
+                        buffer_size,
                         vk::MemoryMapFlags::empty(),
                     )
-                    .expect("Failed to Map Memory") as *mut f32;
+                    .expect("Failed to map memory.") as *mut f32;
 
                 data_ptr.copy_from_nonoverlapping(VERTICES_DATA.as_ptr(), VERTICES_DATA.len());
+                gpu.device.unmap_memory(staging_buffer_memory);
+            }
+            // ## Create vertex buffer in device-local memory
+            // TODO: Replace with allocator library?
+            let (vertex_buffer, vertex_buffer_memory) = VulkanApp::create_buffer(
+                &gpu.device,
+                buffer_size,
+                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                &device_memory_properties,
+            );
 
-                gpu.device.unmap_memory(vertex_buffer_memory);
+            // ## Copy staging buffer -> vertex buffer
+            {
+                let allocate_info = vk::CommandBufferAllocateInfo::builder()
+                    .command_pool(command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1);
+
+                let command_buffers = unsafe {
+                    gpu.device
+                        .allocate_command_buffers(&allocate_info)
+                        .expect("Failed to allocate command buffer.")
+                };
+                let command_buffer = command_buffers[0];
+
+                let begin_info = vk::CommandBufferBeginInfo::builder()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+                unsafe {
+                    gpu.device
+                        .begin_command_buffer(command_buffer, &begin_info)
+                        .expect("Failed to begin command buffer.");
+
+                    let copy_regions = [vk::BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size: buffer_size,
+                    }];
+
+                    gpu.device.cmd_copy_buffer(
+                        command_buffer,
+                        staging_buffer,
+                        vertex_buffer,
+                        &copy_regions,
+                    );
+
+                    gpu.device
+                        .end_command_buffer(command_buffer)
+                        .expect("Failed to end command buffer");
+                }
+
+                let submit_info = [vk::SubmitInfo::builder()
+                    .command_buffers(&command_buffers)
+                    .build()];
+
+                unsafe {
+                    gpu.device
+                        .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
+                        .expect("Failed to Submit Queue.");
+                    gpu.device
+                        .queue_wait_idle(gpu.graphics_queue)
+                        .expect("Failed to wait Queue idle");
+
+                    gpu.device
+                        .free_command_buffers(command_pool, &command_buffers);
+                }
+            }
+
+            unsafe {
+                gpu.device.destroy_buffer(staging_buffer, None);
+                gpu.device.free_memory(staging_buffer_memory, None);
             }
 
             (vertex_buffer, vertex_buffer_memory)
@@ -1055,6 +1086,56 @@ impl VulkanApp {
         }
     }
 
+    fn create_buffer(
+        device: &ash::Device,
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        required_memory_properties: vk::MemoryPropertyFlags,
+        device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+    ) -> (vk::Buffer, vk::DeviceMemory) {
+        // Create buffer
+        let buffer_create_info = vk::BufferCreateInfo::builder()
+            .size(size)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+        let buffer = unsafe {
+            device
+                .create_buffer(&buffer_create_info, None)
+                .expect("Failed to create vertex buffer.")
+        };
+        // Locate memory type
+        let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+        let memory_type_index = device_memory_properties
+            .memory_types
+            .iter()
+            .enumerate()
+            .position(|(i, &m)| {
+                (mem_requirements.memory_type_bits & (1 << i)) > 0
+                    && m.property_flags.contains(required_memory_properties)
+            })
+            .expect("Failed to find suitable memory type.") as u32;
+        // Allocate memory
+        // TODO: Replace with allocator library?
+        let allocate_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(mem_requirements.size)
+            .memory_type_index(memory_type_index);
+
+        let buffer_memory = unsafe {
+            device
+                .allocate_memory(&allocate_info, None)
+                .expect("Failed to allocate vertex buffer memory.")
+        };
+        // Bind memory to buffer
+        unsafe {
+            device
+                .bind_buffer_memory(buffer, buffer_memory, 0)
+                .expect("Failed to bind Buffer.");
+        }
+
+        (buffer, buffer_memory)
+    }
+
     fn draw_frame(&mut self) {
         let wait_fences = [self.apparatus.command_buffer_complete_fences[self.current_frame]];
 
@@ -1062,7 +1143,7 @@ impl VulkanApp {
             self.gpu
                 .device
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
-                .expect("Failed to wait for Fence!");
+                .expect("Failed to wait for Fence.");
 
             let result = self.ext_swapchain.acquire_next_image(
                 self.apparatus.swapchain,
@@ -1089,24 +1170,20 @@ impl VulkanApp {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.apparatus.image_available_semaphores[self.current_frame]];
         let signal_semaphores = [self.apparatus.render_finished_semaphores[self.current_frame]];
+        let command_buffers = [self.apparatus.command_buffers[image_index as usize]];
 
-        let submit_infos = [vk::SubmitInfo {
-            s_type: vk::StructureType::SUBMIT_INFO,
-            p_next: ptr::null(),
-            wait_semaphore_count: wait_semaphores.len() as u32,
-            p_wait_semaphores: wait_semaphores.as_ptr(),
-            p_wait_dst_stage_mask: wait_stages.as_ptr(),
-            command_buffer_count: 1,
-            p_command_buffers: &self.apparatus.command_buffers[image_index as usize],
-            signal_semaphore_count: signal_semaphores.len() as u32,
-            p_signal_semaphores: signal_semaphores.as_ptr(),
-        }];
+        let submit_infos = [vk::SubmitInfo::builder()
+            .wait_semaphores(&wait_semaphores)
+            .wait_dst_stage_mask(&wait_stages)
+            .command_buffers(&command_buffers)
+            .signal_semaphores(&signal_semaphores)
+            .build()];
 
         unsafe {
             self.gpu
                 .device
                 .reset_fences(&wait_fences)
-                .expect("Failed to reset Fence!");
+                .expect("Failed to reset fence.");
 
             self.gpu
                 .device
@@ -1119,17 +1196,12 @@ impl VulkanApp {
         }
 
         let swapchains = [self.apparatus.swapchain];
+        let image_indices = [image_index];
 
-        let present_info = vk::PresentInfoKHR {
-            s_type: vk::StructureType::PRESENT_INFO_KHR,
-            p_next: ptr::null(),
-            wait_semaphore_count: 1,
-            p_wait_semaphores: signal_semaphores.as_ptr(),
-            swapchain_count: 1,
-            p_swapchains: swapchains.as_ptr(),
-            p_image_indices: &image_index,
-            p_results: ptr::null_mut(),
-        };
+        let present_info = vk::PresentInfoKHR::builder()
+            .wait_semaphores(&signal_semaphores)
+            .swapchains(&swapchains)
+            .image_indices(&image_indices);
 
         // Present the queue
         {
