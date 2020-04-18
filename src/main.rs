@@ -73,6 +73,8 @@ struct VulkanApp {
     command_pool: vk::CommandPool,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
+    index_buffer: vk::Buffer,
+    index_buffer_memory: vk::DeviceMemory,
     apparatus: Apparatus, // Resolution-dependent apparatus
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
@@ -107,6 +109,7 @@ impl Apparatus {
         gpu: &Gpu,
         command_pool: vk::CommandPool,
         vertex_buffer: vk::Buffer,
+        index_buffer: vk::Buffer,
         ext_surface: &ash::extensions::khr::Surface,
         ext_swapchain: &ash::extensions::khr::Swapchain,
     ) -> Apparatus {
@@ -383,11 +386,10 @@ impl Apparatus {
                 ..Default::default()
             };
 
-            let vertex_input_assembly_state_info =
-                vk::PipelineInputAssemblyStateCreateInfo{
-                    topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-                    ..Default::default()
-                };
+            let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                ..Default::default()
+            };
 
             let viewports = [vk::Viewport {
                 x: 0.0,
@@ -455,7 +457,7 @@ impl Apparatus {
                     .expect("Failed to create pipeline layout.")
             };
 
-            let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo{
+            let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo {
                 stage_count: shader_stages.len() as u32,
                 p_stages: shader_stages.as_ptr(),
                 p_vertex_input_state: &vertex_input_state_create_info,
@@ -547,8 +549,14 @@ impl Apparatus {
                 let offsets = [0_u64];
                 gpu.device
                     .cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+                gpu.device.cmd_bind_index_buffer(
+                    command_buffer,
+                    index_buffer,
+                    0,
+                    vk::IndexType::UINT32,
+                );
 
-                gpu.device.cmd_draw(command_buffer, 3, 1, 0, 0);
+                gpu.device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
 
                 gpu.device.cmd_end_render_pass(command_buffer);
 
@@ -657,13 +665,14 @@ impl VulkanApp {
             &self.gpu,
             self.command_pool,
             self.vertex_buffer,
+            self.index_buffer,
             &self.ext_surface,
             &self.ext_swapchain,
         );
     }
 
     pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
-        const APP_NAME: &str = "Hello Triangle";
+        const APP_NAME: &str = "";
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
@@ -958,9 +967,11 @@ impl VulkanApp {
 
         // # Create the vertex buffer and allocate its memory
         let (vertex_buffer, vertex_buffer_memory) = {
-            const VERTICES_DATA: [f32; 15] = [
-                0.0, -0.5, 1.0, 0.0, 0.0, -0.5, 0.5, 0.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 0.0,
+            const VERTICES_DATA: [f32; 20] = [
+                -0.75, -0.75, 0.0, 0.0, 0.0, 0.75, -0.75, 1.0, 0.0, 0.0, 0.75, 0.75, 1.0, 1.0, 0.0,
+                -0.75, 0.75, 0.0, 1.0, 0.0,
             ];
+
             let buffer_size = std::mem::size_of_val(&VERTICES_DATA) as vk::DeviceSize;
             let device_memory_properties =
                 unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
@@ -1039,13 +1050,11 @@ impl VulkanApp {
                         .expect("Failed to end command buffer");
                 }
 
-                let submit_info = [
-                    vk::SubmitInfo {
-                        command_buffer_count: command_buffers.len() as u32,
-                        p_command_buffers: command_buffers.as_ptr(),
-                        ..Default::default()
-                    }
-                ];
+                let submit_info = [vk::SubmitInfo {
+                    command_buffer_count: command_buffers.len() as u32,
+                    p_command_buffers: command_buffers.as_ptr(),
+                    ..Default::default()
+                }];
 
                 unsafe {
                     gpu.device
@@ -1068,6 +1077,114 @@ impl VulkanApp {
             (vertex_buffer, vertex_buffer_memory)
         };
 
+        let (index_buffer, index_buffer_memory) = {
+            const INDICES_DATA: [u32; 6] = [0, 2, 1, 2, 0, 3];
+
+            let buffer_size = std::mem::size_of_val(&INDICES_DATA) as vk::DeviceSize;
+            let device_memory_properties =
+                unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
+
+            // ## Create staging buffer in host-visible memory
+            // TODO: Replace with allocator library?
+            let (staging_buffer, staging_buffer_memory) = VulkanApp::create_buffer(
+                &gpu.device,
+                buffer_size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                &device_memory_properties,
+            );
+            // ## Copy data to staging buffer
+            unsafe {
+                let data_ptr = gpu
+                    .device
+                    .map_memory(
+                        staging_buffer_memory,
+                        0,
+                        buffer_size,
+                        vk::MemoryMapFlags::empty(),
+                    )
+                    .expect("Failed to map memory.") as *mut u32;
+
+                data_ptr.copy_from_nonoverlapping(INDICES_DATA.as_ptr(), INDICES_DATA.len());
+                gpu.device.unmap_memory(staging_buffer_memory);
+            }
+            // ## Create buffer in device-local memory
+            // TODO: Replace with allocator library?
+            let (index_buffer, index_buffer_memory) = VulkanApp::create_buffer(
+                &gpu.device,
+                buffer_size,
+                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                &device_memory_properties,
+            );
+
+            // ## Copy staging buffer -> vertex buffer
+            {
+                let allocate_info = vk::CommandBufferAllocateInfo::builder()
+                    .command_pool(command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1);
+
+                let command_buffers = unsafe {
+                    gpu.device
+                        .allocate_command_buffers(&allocate_info)
+                        .expect("Failed to allocate command buffer.")
+                };
+                let command_buffer = command_buffers[0];
+
+                let begin_info = vk::CommandBufferBeginInfo::builder()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+                unsafe {
+                    gpu.device
+                        .begin_command_buffer(command_buffer, &begin_info)
+                        .expect("Failed to begin command buffer.");
+
+                    let copy_regions = [vk::BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size: buffer_size,
+                    }];
+
+                    gpu.device.cmd_copy_buffer(
+                        command_buffer,
+                        staging_buffer,
+                        index_buffer,
+                        &copy_regions,
+                    );
+
+                    gpu.device
+                        .end_command_buffer(command_buffer)
+                        .expect("Failed to end command buffer");
+                }
+
+                let submit_info = [vk::SubmitInfo {
+                    command_buffer_count: command_buffers.len() as u32,
+                    p_command_buffers: command_buffers.as_ptr(),
+                    ..Default::default()
+                }];
+
+                unsafe {
+                    gpu.device
+                        .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
+                        .expect("Failed to Submit Queue.");
+                    gpu.device
+                        .queue_wait_idle(gpu.graphics_queue)
+                        .expect("Failed to wait Queue idle");
+
+                    gpu.device
+                        .free_command_buffers(command_pool, &command_buffers);
+                }
+            }
+
+            unsafe {
+                gpu.device.destroy_buffer(staging_buffer, None);
+                gpu.device.free_memory(staging_buffer_memory, None);
+            }
+
+            (index_buffer, index_buffer_memory)
+        };
+
         // # Set up the apparatus
         let apparatus = Apparatus::new(
             &window,
@@ -1075,6 +1192,7 @@ impl VulkanApp {
             &gpu,
             command_pool,
             vertex_buffer,
+            index_buffer,
             &ext_surface,
             &ext_swapchain,
         );
@@ -1093,6 +1211,8 @@ impl VulkanApp {
             command_pool,
             vertex_buffer,
             vertex_buffer_memory,
+            index_buffer,
+            index_buffer_memory,
             // - Resolution-dependent apparatus
             apparatus,
 
@@ -1189,18 +1309,16 @@ impl VulkanApp {
         let signal_semaphores = [self.apparatus.render_finished_semaphores[self.current_frame]];
         let command_buffers = [self.apparatus.command_buffers[image_index as usize]];
 
-        let submit_infos = [
-            vk::SubmitInfo {
-                wait_semaphore_count: wait_semaphores.len() as u32,
-                p_wait_semaphores: wait_semaphores.as_ptr(),
-                p_wait_dst_stage_mask: wait_stages.as_ptr(),
-                command_buffer_count: command_buffers.len() as u32,
-                p_command_buffers: command_buffers.as_ptr(),
-                signal_semaphore_count: signal_semaphores.len() as u32,
-                p_signal_semaphores: signal_semaphores.as_ptr(),
-                ..Default::default()
-            }
-        ];
+        let submit_infos = [vk::SubmitInfo {
+            wait_semaphore_count: wait_semaphores.len() as u32,
+            p_wait_semaphores: wait_semaphores.as_ptr(),
+            p_wait_dst_stage_mask: wait_stages.as_ptr(),
+            command_buffer_count: command_buffers.len() as u32,
+            p_command_buffers: command_buffers.as_ptr(),
+            signal_semaphore_count: signal_semaphores.len() as u32,
+            p_signal_semaphores: signal_semaphores.as_ptr(),
+            ..Default::default()
+        }];
 
         unsafe {
             self.gpu
@@ -1259,6 +1377,8 @@ impl Drop for VulkanApp {
 
             self.gpu.device.destroy_buffer(self.vertex_buffer, None);
             self.gpu.device.free_memory(self.vertex_buffer_memory, None);
+            self.gpu.device.destroy_buffer(self.index_buffer, None);
+            self.gpu.device.free_memory(self.index_buffer_memory, None);
 
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
