@@ -8,12 +8,14 @@ use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk;
 use ash::vk_make_version;
+use glam::*;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr;
+// use std::f32::consts::PI;
 
 // Constants
 const NUM_FRAMES: usize = 2;
@@ -49,11 +51,21 @@ struct VulkanApp {
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
     index_buffer_memory: vk::DeviceMemory,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: Vec<vk::DescriptorSet>,
+    uniform_buffer_layout: vk::DescriptorSetLayout,
+    uniform_buffers: Vec<vk::Buffer>,
+    uniform_buffers_memory: Vec<vk::DeviceMemory>,
     apparatus: Apparatus, // Resolution-dependent apparatus
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
     current_frame: usize,
+}
+
+#[allow(dead_code)]
+struct UniformBuffer {
+    mtx_world_to_clip: Mat4,
 }
 
 fn create_buffer(
@@ -72,11 +84,12 @@ fn create_buffer(
     let buffer = unsafe {
         device
             .create_buffer(&buffer_create_info, None)
-            .expect("Failed to create vertex buffer.")
+            .expect("Failed to create buffer.")
     };
     // Locate memory type
     let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-    let memory_type_index = gpu.memory_properties
+    let memory_type_index = gpu
+        .memory_properties
         .memory_types
         .iter()
         .enumerate()
@@ -94,13 +107,13 @@ fn create_buffer(
     let buffer_memory = unsafe {
         device
             .allocate_memory(&allocate_info, None)
-            .expect("Failed to allocate vertex buffer memory.")
+            .expect("Failed to allocate buffer memory.")
     };
     // Bind memory to buffer
     unsafe {
         device
             .bind_buffer_memory(buffer, buffer_memory, 0)
-            .expect("Failed to bind Buffer.");
+            .expect("Failed to bind buffer.");
     }
 
     (buffer, buffer_memory)
@@ -245,6 +258,8 @@ impl VulkanApp {
             self.command_pool,
             self.vertex_buffer,
             self.index_buffer,
+            self.uniform_buffer_layout,
+            &self.descriptor_sets,
             &self.ext_surface,
             &self.ext_swapchain,
         );
@@ -544,7 +559,7 @@ impl VulkanApp {
 
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
 
-        // # Create the vertex buffer and allocate its memory
+        // # Create and upload the vertex buffer
         let (vertex_buffer, vertex_buffer_memory) = {
             const VERTICES_DATA: [f32; 20] = [
                 -0.75, -0.75, 0.0, 0.0, 0.0, 0.75, -0.75, 1.0, 0.0, 0.0, 0.75, 0.75, 1.0, 1.0, 0.0,
@@ -558,6 +573,7 @@ impl VulkanApp {
             )
         };
 
+        // # Create and upload index buffer
         let (index_buffer, index_buffer_memory) = {
             const INDICES_DATA: [u32; 6] = [0, 2, 1, 2, 0, 3];
 
@@ -569,6 +585,108 @@ impl VulkanApp {
             )
         };
 
+        // # Uniform buffer descriptor layout
+        let uniform_buffer_layout = {
+            let bindings = [vk::DescriptorSetLayoutBinding {
+                binding: 0,
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+                p_immutable_samplers: ptr::null(),
+            }];
+
+            let ubo_layout_create_info =
+                vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
+
+            unsafe {
+                gpu.device
+                    .create_descriptor_set_layout(&ubo_layout_create_info, None)
+                    .expect("Failed to create Descriptor Set Layout!")
+            }
+        };
+
+        // # Create the uniform buffer
+        let (uniform_buffers, uniform_buffers_memory) = {
+            let buffer_size = std::mem::size_of::<UniformBuffer>();
+
+            let mut uniform_buffers = vec![];
+            let mut uniform_buffers_memory = vec![];
+
+            for _ in 0..NUM_FRAMES {
+                let (uniform_buffer, uniform_buffer_memory) = create_buffer(
+                    &gpu,
+                    buffer_size as u64,
+                    vk::BufferUsageFlags::UNIFORM_BUFFER,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                );
+                uniform_buffers.push(uniform_buffer);
+                uniform_buffers_memory.push(uniform_buffer_memory);
+            }
+
+            (uniform_buffers, uniform_buffers_memory)
+        };
+
+        // # Create descriptor pool
+        let descriptor_pool = {
+            let pool_sizes = [vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: NUM_FRAMES as u32,
+            }];
+
+            let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
+                .max_sets(NUM_FRAMES as u32)
+                .pool_sizes(&pool_sizes);
+
+            unsafe {
+                gpu.device
+                    .create_descriptor_pool(&descriptor_pool_create_info, None)
+                    .expect("Failed to create descriptor pool.")
+            }
+        };
+
+        // # Create descriptor sets
+        let descriptor_sets = {
+            let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
+            for _ in 0..NUM_FRAMES {
+                layouts.push(uniform_buffer_layout);
+            }
+
+            let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(descriptor_pool)
+                .set_layouts(&layouts);
+
+            let descriptor_sets = unsafe {
+                gpu.device
+                    .allocate_descriptor_sets(&descriptor_set_allocate_info)
+                    .expect("Failed to allocate descriptor sets.")
+            };
+
+            for (i, &descritptor_set) in descriptor_sets.iter().enumerate() {
+                let descriptor_buffer_info = [vk::DescriptorBufferInfo {
+                    buffer: uniform_buffers[i],
+                    offset: 0,
+                    range: std::mem::size_of::<UniformBuffer>() as u64,
+                }];
+
+                let descriptor_write_sets = [vk::WriteDescriptorSet {
+                    dst_set: descritptor_set,
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    p_buffer_info: descriptor_buffer_info.as_ptr(),
+                    ..Default::default()
+                }];
+
+                unsafe {
+                    gpu.device
+                        .update_descriptor_sets(&descriptor_write_sets, &[]);
+                }
+            }
+
+            descriptor_sets
+        };
+
         // # Set up the apparatus
         let apparatus = Apparatus::new(
             &window,
@@ -577,6 +695,8 @@ impl VulkanApp {
             command_pool,
             vertex_buffer,
             index_buffer,
+            uniform_buffer_layout,
+            &descriptor_sets,
             &ext_surface,
             &ext_swapchain,
         );
@@ -597,6 +717,11 @@ impl VulkanApp {
             vertex_buffer_memory,
             index_buffer,
             index_buffer_memory,
+            descriptor_pool,
+            descriptor_sets,
+            uniform_buffer_layout,
+            uniform_buffers,
+            uniform_buffers_memory,
             // - Resolution-dependent apparatus
             apparatus,
 
@@ -637,6 +762,35 @@ impl VulkanApp {
                 }
             }
         };
+
+        // Update uniform buffer
+        {
+            // let extent = &self.apparatus.swapchain_extent;
+            let ubos = [UniformBuffer {
+                mtx_world_to_clip: Mat4::from_scale(Vec3::new(0.5, 1.0, 1.0)),
+            }];
+
+            let buffer_size = (std::mem::size_of::<UniformBuffer>() * ubos.len()) as u64;
+
+            unsafe {
+                let data_ptr =
+                    self.gpu
+                        .device
+                        .map_memory(
+                            self.uniform_buffers_memory[image_index as usize],
+                            0,
+                            buffer_size,
+                            vk::MemoryMapFlags::empty(),
+                        )
+                        .expect("Failed to map memory.") as *mut UniformBuffer;
+
+                data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
+
+                self.gpu
+                    .device
+                    .unmap_memory(self.uniform_buffers_memory[image_index as usize]);
+            }
+        }
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.apparatus.image_available_semaphores[self.current_frame]];
@@ -709,8 +863,26 @@ impl Drop for VulkanApp {
 
             self.apparatus.destroy(&self.gpu, &self.ext_swapchain);
 
+            // Uniform buffer
+            self.gpu
+                .device
+                .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
+            self.gpu
+                .device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+
+            for i in 0..self.uniform_buffers.len() {
+                self.gpu
+                    .device
+                    .destroy_buffer(self.uniform_buffers[i], None);
+                self.gpu
+                    .device
+                    .free_memory(self.uniform_buffers_memory[i], None);
+            }
+            // Vertex buffer
             self.gpu.device.destroy_buffer(self.vertex_buffer, None);
             self.gpu.device.free_memory(self.vertex_buffer_memory, None);
+            // Index buffer
             self.gpu.device.destroy_buffer(self.index_buffer, None);
             self.gpu.device.free_memory(self.index_buffer_memory, None);
 

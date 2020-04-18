@@ -9,7 +9,7 @@ pub struct Apparatus {
     // - Swapchain
     pub swapchain: vk::SwapchainKHR,
     pub _swapchain_format: vk::Format,
-    pub _swapchain_extent: vk::Extent2D,
+    pub swapchain_extent: vk::Extent2D,
     pub _swapchain_images: Vec<vk::Image>,
     pub swapchain_imageviews: Vec<vk::ImageView>,
     // TODO: Depth image
@@ -36,6 +36,8 @@ impl Apparatus {
         command_pool: vk::CommandPool,
         vertex_buffer: vk::Buffer,
         index_buffer: vk::Buffer,
+        uniform_buffer_layout: vk::DescriptorSetLayout,
+        descriptor_sets: &[vk::DescriptorSet],
         ext_surface: &ash::extensions::khr::Surface,
         ext_swapchain: &ash::extensions::khr::Swapchain,
     ) -> Apparatus {
@@ -257,11 +259,11 @@ impl Apparatus {
         let (graphics_pipeline, pipeline_layout) = {
             let vert_shader_module = create_shader_module(
                 &gpu.device,
-                include_bytes!("../shaders/spv/17-shader-vertexbuffer.vert.spv").to_vec(),
+                include_bytes!("../shaders/spv/21-shader-ubo.vert.spv").to_vec(),
             );
             let frag_shader_module = create_shader_module(
                 &gpu.device,
-                include_bytes!("../shaders/spv/17-shader-vertexbuffer.frag.spv").to_vec(),
+                include_bytes!("../shaders/spv/21-shader-ubo.frag.spv").to_vec(),
             );
 
             let main_function_name = CString::new("main").unwrap();
@@ -373,7 +375,9 @@ impl Apparatus {
                 ..Default::default()
             };
 
-            let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::builder();
+            let set_layouts = [uniform_buffer_layout];
+            let pipeline_layout_create_info =
+                vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
 
             let pipeline_layout = unsafe {
                 gpu.device
@@ -439,7 +443,7 @@ impl Apparatus {
             unsafe {
                 gpu.device
                     .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                    .expect("Failed to begin recording Command Buffer");
+                    .expect("Failed to begin recording command buffer.");
             }
 
             let clear_values = [vk::ClearValue {
@@ -469,16 +473,36 @@ impl Apparatus {
                     graphics_pipeline,
                 );
 
-                let vertex_buffers = [vertex_buffer];
-                let offsets = [0_u64];
-                gpu.device
-                    .cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-                gpu.device.cmd_bind_index_buffer(
-                    command_buffer,
-                    index_buffer,
-                    0,
-                    vk::IndexType::UINT32,
-                );
+                // Bind index and vertex buffers
+                {
+                    let vertex_buffers = [vertex_buffer];
+                    let offsets = [0_u64];
+                    gpu.device.cmd_bind_vertex_buffers(
+                        command_buffer,
+                        0,
+                        &vertex_buffers,
+                        &offsets,
+                    );
+                    gpu.device.cmd_bind_index_buffer(
+                        command_buffer,
+                        index_buffer,
+                        0,
+                        vk::IndexType::UINT32,
+                    );
+                }
+
+                // Bind descriptor sets
+                {
+                    let sets = [descriptor_sets[i]];
+                    gpu.device.cmd_bind_descriptor_sets(
+                        command_buffer,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        pipeline_layout,
+                        0,
+                        &sets,
+                        &[],
+                    );
+                }
 
                 gpu.device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
 
@@ -486,7 +510,7 @@ impl Apparatus {
 
                 gpu.device
                     .end_command_buffer(command_buffer)
-                    .expect("Failed to record Command Buffer at Ending!");
+                    .expect("Failed to end recording command buffer.");
             }
         }
 
@@ -534,7 +558,7 @@ impl Apparatus {
             _surface_formats: surface_formats,
             swapchain,
             _swapchain_format: swapchain_format,
-            _swapchain_extent: swapchain_extent,
+            swapchain_extent,
             _swapchain_images: swapchain_images,
             swapchain_imageviews,
             render_pass,

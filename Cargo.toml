@@ -10,7 +10,7 @@ edition = "2018"
 winit = "0.20.0"
 ash = "0.29.0"
 image = "0.22"
-cgmath = "0.17.0"
+glam = "0.8.6"
 memoffset = "0.5.1" #TODO: Consider removing dependency
 
 [target.'cfg(target_os = "windows")'.dependencies]
