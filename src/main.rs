@@ -23,7 +23,7 @@ pub struct Gpu {
     physical_device: vk::PhysicalDevice,
     _exts: Vec<vk::ExtensionProperties>,
     present_modes: Vec<vk::PresentModeKHR>,
-    _memory_properties: vk::PhysicalDeviceMemoryProperties,
+    memory_properties: vk::PhysicalDeviceMemoryProperties,
     _properties: vk::PhysicalDeviceProperties,
     graphics_queue_idx: u32,
     present_queue_idx: u32,
@@ -61,7 +61,6 @@ fn create_buffer(
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     required_memory_properties: vk::MemoryPropertyFlags,
-    device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
 ) -> (vk::Buffer, vk::DeviceMemory) {
     let device = &gpu.device;
     // Create buffer
@@ -77,7 +76,7 @@ fn create_buffer(
     };
     // Locate memory type
     let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-    let memory_type_index = device_memory_properties
+    let memory_type_index = gpu.memory_properties
         .memory_types
         .iter()
         .enumerate()
@@ -111,12 +110,9 @@ pub fn new_buffer<T>(
     data: &[T],
     usage: vk::BufferUsageFlags,
     gpu: &Gpu,
-    instance: &ash::Instance,
     command_pool: vk::CommandPool,
 ) -> (vk::Buffer, vk::DeviceMemory) {
     let buffer_size = std::mem::size_of_val(data) as vk::DeviceSize;
-    let device_memory_properties =
-        unsafe { instance.get_physical_device_memory_properties(gpu.physical_device) };
 
     // ## Create staging buffer in host-visible memory
     // TODO: Replace with allocator library?
@@ -125,7 +121,6 @@ pub fn new_buffer<T>(
         buffer_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        &device_memory_properties,
     );
     // ## Copy data to staging buffer
     unsafe {
@@ -149,7 +144,6 @@ pub fn new_buffer<T>(
         buffer_size,
         vk::BufferUsageFlags::TRANSFER_DST | usage,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        &device_memory_properties,
     );
 
     // ## Copy staging buffer -> vertex buffer
@@ -524,7 +518,7 @@ impl VulkanApp {
                 physical_device: cgpu.physical_device,
                 _exts: cgpu.exts.clone(),
                 present_modes: cgpu.present_modes.clone(),
-                _memory_properties: cgpu.memory_properties,
+                memory_properties: cgpu.memory_properties,
                 _properties: cgpu.properties,
                 graphics_queue_idx: cgpu.graphics_queue_idx,
                 present_queue_idx: cgpu.present_queue_idx,
@@ -560,7 +554,6 @@ impl VulkanApp {
                 &VERTICES_DATA,
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 &gpu,
-                &instance,
                 command_pool,
             )
         };
@@ -572,7 +565,6 @@ impl VulkanApp {
                 &INDICES_DATA,
                 vk::BufferUsageFlags::INDEX_BUFFER,
                 &gpu,
-                &instance,
                 command_pool,
             )
         };
