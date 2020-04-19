@@ -12,7 +12,9 @@ pub struct Apparatus {
     pub swapchain_extent: vk::Extent2D,
     pub _swapchain_images: Vec<vk::Image>,
     pub swapchain_imageviews: Vec<vk::ImageView>,
-    // TODO: Depth image
+    pub depth_image: vk::Image,
+    pub depth_image_view: vk::ImageView,
+    pub depth_image_memory: vk::DeviceMemory,
     pub render_pass: vk::RenderPass,
     pub framebuffers: Vec<vk::Framebuffer>,
     // - Pipelines
@@ -26,6 +28,98 @@ pub struct Apparatus {
     pub image_available_semaphores: Vec<vk::Semaphore>,
     pub render_finished_semaphores: Vec<vk::Semaphore>,
     pub command_buffer_complete_fences: Vec<vk::Fence>,
+}
+
+// TODO: Move to a more sensible file
+pub fn create_image(
+    gpu: &Gpu,
+    width: u32,
+    height: u32,
+    mip_levels: u32,
+    num_samples: vk::SampleCountFlags,
+    format: vk::Format,
+    tiling: vk::ImageTiling,
+    usage: vk::ImageUsageFlags,
+    required_memory_properties: vk::MemoryPropertyFlags,
+) -> (vk::Image, vk::DeviceMemory) {
+    let image_create_info = vk::ImageCreateInfo::builder()
+        .image_type(vk::ImageType::TYPE_2D)
+        .format(format)
+        .mip_levels(mip_levels)
+        .array_layers(1)
+        .samples(num_samples)
+        .tiling(tiling)
+        .usage(usage)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE)
+        .extent(vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        });
+
+    let texture_image = unsafe {
+        gpu.device
+            .create_image(&image_create_info, None)
+            .expect("Failed to create texture image.")
+    };
+
+    let image_memory_requirement =
+        unsafe { gpu.device.get_image_memory_requirements(texture_image) };
+    let memory_type_index = gpu
+        .memory_properties
+        .memory_types
+        .iter()
+        .enumerate()
+        .position(|(i, &memory_type)| {
+            (image_memory_requirement.memory_type_bits & (1 << i)) > 0
+                && memory_type
+                    .property_flags
+                    .contains(required_memory_properties)
+        })
+        .expect("Failed to find suitable memory type.") as u32;
+
+    let memory_allocate_info = vk::MemoryAllocateInfo::builder()
+        .allocation_size(image_memory_requirement.size)
+        .memory_type_index(memory_type_index);
+    let texture_image_memory = unsafe {
+        gpu.device
+            .allocate_memory(&memory_allocate_info, None)
+            .expect("Failed to allocate texture image memory.")
+    };
+
+    unsafe {
+        gpu.device
+            .bind_image_memory(texture_image, texture_image_memory, 0)
+            .expect("Failed to bind image memory.");
+    }
+
+    (texture_image, texture_image_memory)
+}
+
+pub fn create_image_view(
+    gpu: &Gpu,
+    image: vk::Image,
+    format: vk::Format,
+    aspect_flags: vk::ImageAspectFlags,
+    mip_levels: u32,
+) -> vk::ImageView {
+    let imageview_create_info = vk::ImageViewCreateInfo::builder()
+        .view_type(vk::ImageViewType::TYPE_2D)
+        .format(format)
+        .subresource_range(vk::ImageSubresourceRange {
+            aspect_mask: aspect_flags,
+            base_mip_level: 0,
+            level_count: mip_levels,
+            base_array_layer: 0,
+            layer_count: 1,
+        })
+        .image(image);
+
+    unsafe {
+        gpu.device
+            .create_image_view(&imageview_create_info, None)
+            .expect("Failed to create Image View!")
+    }
 }
 
 impl Apparatus {
@@ -176,6 +270,31 @@ impl Apparatus {
             imageviews
         };
 
+        // # Create depth buffer
+        let depth_format = vk::Format::D32_SFLOAT;
+        let (depth_image, depth_image_view, depth_image_memory) = {
+            let (depth_image, depth_image_memory) = create_image(
+                &gpu,
+                swapchain_extent.width,
+                swapchain_extent.height,
+                1,
+                vk::SampleCountFlags::TYPE_1,
+                depth_format,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            );
+            let depth_image_view = create_image_view(
+                &gpu,
+                depth_image,
+                depth_format,
+                vk::ImageAspectFlags::DEPTH,
+                1,
+            );
+
+            (depth_image, depth_image_view, depth_image_memory)
+        };
+
         // # Create render pass
         let render_pass = {
             let attachments = vec![
@@ -191,34 +310,34 @@ impl Apparatus {
                     initial_layout: vk::ImageLayout::UNDEFINED,
                     final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
                 },
-                // TODO: Depth attachment
-                // vk::AttachmentDescription {
-                //     format: depth_format, // TODO: Choose this format
-                //     flags: vk::AttachmentDescriptionFlags::empty(),
-                //     samples: vk::SampleCountFlags::TYPE_1,
-                //     load_op: vk::AttachmentLoadOp::DONT_CARE,
-                //     store_op: vk::AttachmentStoreOp::DONT_CARE,
-                //     stencil_load_op: vk::AttachmentLoadOp::LOAD, // ?
-                //     stencil_store_op: vk::AttachmentStoreOp::STORE, // ?
-                //     initial_layout: vk::ImageLayout::UNDEFINED,
-                //     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                // },
+                // Depth attachment
+                vk::AttachmentDescription {
+                    format: depth_format,
+                    flags: vk::AttachmentDescriptionFlags::empty(),
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    load_op: vk::AttachmentLoadOp::CLEAR,
+                    store_op: vk::AttachmentStoreOp::DONT_CARE,
+                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE, // ?
+                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE, // ?
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                },
             ];
 
             let color_attachment_ref = [vk::AttachmentReference {
                 attachment: 0,
                 layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             }];
-            // TODO: Depth attachment ref
-            // let depth_attachment_ref = vk::AttachmentReference {
-            //     attachment: 1,
-            //     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            // };
+            let depth_attachment_ref = vk::AttachmentReference {
+                attachment: 1,
+                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            };
 
             let subpasses = [vk::SubpassDescription {
                 pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
                 color_attachment_count: 1,
                 p_color_attachments: color_attachment_ref.as_ptr(),
+                p_depth_stencil_attachment: &depth_attachment_ref,
                 ..Default::default()
             }];
 
@@ -238,7 +357,7 @@ impl Apparatus {
             swapchain_imageviews
                 .iter()
                 .map(|&imageview| {
-                    let attachments = [imageview];
+                    let attachments = [imageview, depth_image_view];
 
                     let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
                         .render_pass(render_pass)
@@ -353,8 +472,12 @@ impl Apparatus {
                 ..Default::default()
             };
 
-            // TODO: Depth
             let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
+                depth_test_enable: vk::TRUE,
+                depth_write_enable: vk::TRUE,
+                depth_compare_op: vk::CompareOp::LESS,
+                max_depth_bounds: 1.0,
+                min_depth_bounds: 0.0,
                 ..Default::default()
             };
 
@@ -447,11 +570,21 @@ impl Apparatus {
                     .expect("Failed to begin recording command buffer.");
             }
 
-            let clear_values = [vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
+            let clear_values = [
+                vk::ClearValue {
+                    // Clear value for color buffer
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
                 },
-            }];
+                vk::ClearValue {
+                    // Clear value for depth buffer
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                },
+            ];
 
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(render_pass)
@@ -563,6 +696,9 @@ impl Apparatus {
             swapchain_extent,
             _swapchain_images: swapchain_images,
             swapchain_imageviews,
+            depth_image,
+            depth_image_view,
+            depth_image_memory,
             render_pass,
             framebuffers,
             graphics_pipeline,
@@ -595,6 +731,11 @@ impl Apparatus {
             for &imageview in self.swapchain_imageviews.iter() {
                 gpu.device.destroy_image_view(imageview, None);
             }
+
+            gpu.device.destroy_image_view(self.depth_image_view, None);
+            gpu.device.destroy_image(self.depth_image, None);
+            gpu.device.free_memory(self.depth_image_memory, None);
+
             ext_swapchain.destroy_swapchain(self.swapchain, None);
         }
     }
