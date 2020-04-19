@@ -36,6 +36,7 @@ impl Apparatus {
         command_pool: vk::CommandPool,
         vertex_buffer: vk::Buffer,
         index_buffer: vk::Buffer,
+        num_indices: u32,
         uniform_buffer_layout: vk::DescriptorSetLayout,
         descriptor_sets: &[vk::DescriptorSet],
         ext_surface: &ash::extensions::khr::Surface,
@@ -504,7 +505,8 @@ impl Apparatus {
                     );
                 }
 
-                gpu.device.cmd_draw_indexed(command_buffer, 18, 1, 0, 0, 0);
+                gpu.device
+                    .cmd_draw_indexed(command_buffer, num_indices, 1, 0, 0, 0);
 
                 gpu.device.cmd_end_render_pass(command_buffer);
 
