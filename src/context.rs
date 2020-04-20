@@ -28,6 +28,8 @@ fn vk_to_string(raw_string_array: &[c_char]) -> String {
 
 pub struct Context {
     window: winit::window::Window,
+    event_loop: Option<winit::event_loop::EventLoop<()>>,
+
     _entry: ash::Entry,
     instance: ash::Instance,
     surface: vk::SurfaceKHR,
@@ -80,18 +82,19 @@ impl Context {
         );
     }
 
-    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Context {
+    pub fn new() -> Context {
         const APP_NAME: &str = "";
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
 
         // # Init window
+        let event_loop = EventLoop::new();
         let window = {
             winit::window::WindowBuilder::new()
                 .with_title(APP_NAME)
                 .with_inner_size(winit::dpi::LogicalSize::new(800, 600))
-                .build(event_loop)
+                .build(&event_loop)
                 .expect("Failed to create window.")
         };
 
@@ -557,6 +560,8 @@ impl Context {
 
         Context {
             window,
+            event_loop: Some(event_loop),
+
             _entry: entry,
             instance,
             surface,
@@ -720,50 +725,53 @@ impl Context {
         self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
     }
 
-    pub fn main_loop(mut self, event_loop: EventLoop<()>) {
-        event_loop.run(move |event, _, control_flow| match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                WindowEvent::Resized(physical_size) => {
-                    if self.apparatus.swapchain_extent.width != physical_size.width
-                        || self.apparatus.swapchain_extent.height != physical_size.height
-                    {
-                        self.recreate_resolution_dependent_state();
+    pub fn run_loop(mut self) {
+        self.event_loop
+            .take()
+            .unwrap()
+            .run(move |event, _, control_flow| match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    WindowEvent::Resized(physical_size) => {
+                        if self.apparatus.swapchain_extent.width != physical_size.width
+                            || self.apparatus.swapchain_extent.height != physical_size.height
+                        {
+                            self.recreate_resolution_dependent_state();
+                        }
                     }
-                }
-                WindowEvent::KeyboardInput { input, .. } => match input {
-                    KeyboardInput {
-                        virtual_keycode,
-                        state,
-                        ..
-                    } => match (virtual_keycode, state) {
-                        (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
-                            *control_flow = ControlFlow::Exit
-                        }
-                        (Some(VirtualKeyCode::Return), ElementState::Pressed) => {
-                            *control_flow = ControlFlow::Exit
-                        }
-                        _ => {}
+                    WindowEvent::KeyboardInput { input, .. } => match input {
+                        KeyboardInput {
+                            virtual_keycode,
+                            state,
+                            ..
+                        } => match (virtual_keycode, state) {
+                            (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
+                                *control_flow = ControlFlow::Exit
+                            }
+                            (Some(VirtualKeyCode::Return), ElementState::Pressed) => {
+                                *control_flow = ControlFlow::Exit
+                            }
+                            _ => {}
+                        },
                     },
+                    _ => {}
                 },
-                _ => {}
-            },
-            Event::MainEventsCleared => {
-                self.window.request_redraw();
-            }
-            Event::RedrawRequested(_window_id) => {
-                self.draw_frame();
-            }
-            Event::LoopDestroyed => {
-                unsafe {
-                    self.gpu
-                        .device
-                        .device_wait_idle()
-                        .expect("Failed to wait device idle!")
-                };
-            }
-            _ => (),
-        })
+                Event::MainEventsCleared => {
+                    self.window.request_redraw();
+                }
+                Event::RedrawRequested(_window_id) => {
+                    self.draw_frame();
+                }
+                Event::LoopDestroyed => {
+                    unsafe {
+                        self.gpu
+                            .device
+                            .device_wait_idle()
+                            .expect("Failed to wait device idle!")
+                    };
+                }
+                _ => (),
+            })
     }
 }
 
