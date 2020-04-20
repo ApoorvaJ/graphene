@@ -1,5 +1,25 @@
 use crate::*;
 
+// This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`
+// member expects a *u32, but `include_bytes!()` produces a Vec<u8>.
+// TODO: Investigate how to properly address this.
+#[allow(clippy::cast_ptr_alignment)]
+fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
+    let shader_module_create_info = vk::ShaderModuleCreateInfo {
+        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::ShaderModuleCreateFlags::empty(),
+        code_size: code.len(),
+        p_code: code.as_ptr() as *const u32,
+    };
+
+    unsafe {
+        device
+            .create_shader_module(&shader_module_create_info, None)
+            .expect("Failed to create shader module.")
+    }
+}
+
 // Resolution-dependent rendering stuff.
 // TODO: Find a better name for this?
 pub struct Apparatus {

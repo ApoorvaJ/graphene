@@ -16,3 +16,7 @@ memoffset = "0.5.1" #TODO: Consider removing dependency
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.5", features = ["windef", "libloaderapi"] }
+
+[[bin]]
+name = "00"
+path = "src/demos/00/main.rs"

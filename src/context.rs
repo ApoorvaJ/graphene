@@ -1,7 +1,5 @@
-mod apparatus;
-use apparatus::*;
-mod utility;
-use crate::{utility::debug::*, utility::*};
+use crate::apparatus::*;
+use crate::*;
 
 use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
@@ -9,34 +7,26 @@ use ash::version::InstanceV1_0;
 use ash::vk;
 use ash::vk_make_version;
 use glam::*;
+use std::ffi::CString;
+use std::os::raw::c_char;
+use std::os::raw::c_void;
+use std::ptr;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
-use std::f32::consts::PI;
-use std::ffi::CString;
-use std::os::raw::c_char;
-use std::ptr;
+fn vk_to_string(raw_string_array: &[c_char]) -> String {
+    let raw_string = unsafe {
+        let pointer = raw_string_array.as_ptr();
+        CStr::from_ptr(pointer)
+    };
 
-// Constants
-const NUM_FRAMES: usize = 2;
-const DEGREES_TO_RADIANS: f32 = PI / 180.0;
-
-pub struct Gpu {
-    // Physical device
-    physical_device: vk::PhysicalDevice,
-    _exts: Vec<vk::ExtensionProperties>,
-    present_modes: Vec<vk::PresentModeKHR>,
-    memory_properties: vk::PhysicalDeviceMemoryProperties,
-    _properties: vk::PhysicalDeviceProperties,
-    graphics_queue_idx: u32,
-    present_queue_idx: u32,
-    // Logical device
-    device: ash::Device,
-    graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
+    raw_string
+        .to_str()
+        .expect("Failed to convert vulkan raw string.")
+        .to_owned()
 }
 
-struct VulkanApp {
+pub struct Context {
     window: winit::window::Window,
     _entry: ash::Entry,
     instance: ash::Instance,
@@ -66,186 +56,7 @@ struct VulkanApp {
     start_instant: std::time::Instant,
 }
 
-#[allow(dead_code)]
-struct UniformBuffer {
-    mtx_world_to_clip: Mat4,
-}
-
-fn create_buffer(
-    gpu: &Gpu,
-    size: vk::DeviceSize,
-    usage: vk::BufferUsageFlags,
-    required_memory_properties: vk::MemoryPropertyFlags,
-) -> (vk::Buffer, vk::DeviceMemory) {
-    let device = &gpu.device;
-    // Create buffer
-    let buffer_create_info = vk::BufferCreateInfo::builder()
-        .size(size)
-        .usage(usage)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE);
-
-    let buffer = unsafe {
-        device
-            .create_buffer(&buffer_create_info, None)
-            .expect("Failed to create buffer.")
-    };
-    // Locate memory type
-    let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-    let memory_type_index = gpu
-        .memory_properties
-        .memory_types
-        .iter()
-        .enumerate()
-        .position(|(i, &m)| {
-            (mem_requirements.memory_type_bits & (1 << i)) > 0
-                && m.property_flags.contains(required_memory_properties)
-        })
-        .expect("Failed to find suitable memory type.") as u32;
-    // Allocate memory
-    // TODO: Replace with allocator library?
-    let allocate_info = vk::MemoryAllocateInfo::builder()
-        .allocation_size(mem_requirements.size)
-        .memory_type_index(memory_type_index);
-
-    let buffer_memory = unsafe {
-        device
-            .allocate_memory(&allocate_info, None)
-            .expect("Failed to allocate buffer memory.")
-    };
-    // Bind memory to buffer
-    unsafe {
-        device
-            .bind_buffer_memory(buffer, buffer_memory, 0)
-            .expect("Failed to bind buffer.");
-    }
-
-    (buffer, buffer_memory)
-}
-
-pub fn new_buffer<T>(
-    data: &[T],
-    usage: vk::BufferUsageFlags,
-    gpu: &Gpu,
-    command_pool: vk::CommandPool,
-) -> (vk::Buffer, vk::DeviceMemory) {
-    let buffer_size = std::mem::size_of_val(data) as vk::DeviceSize;
-
-    // ## Create staging buffer in host-visible memory
-    // TODO: Replace with allocator library?
-    let (staging_buffer, staging_buffer_memory) = create_buffer(
-        &gpu,
-        buffer_size,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-    );
-    // ## Copy data to staging buffer
-    unsafe {
-        let data_ptr = gpu
-            .device
-            .map_memory(
-                staging_buffer_memory,
-                0,
-                buffer_size,
-                vk::MemoryMapFlags::empty(),
-            )
-            .expect("Failed to map memory.") as *mut T;
-
-        data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
-        gpu.device.unmap_memory(staging_buffer_memory);
-    }
-    // ## Create buffer in device-local memory
-    // TODO: Replace with allocator library?
-    let (buffer, buffer_memory) = create_buffer(
-        &gpu,
-        buffer_size,
-        vk::BufferUsageFlags::TRANSFER_DST | usage,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    );
-
-    // ## Copy staging buffer -> vertex buffer
-    {
-        let allocate_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-
-        let command_buffers = unsafe {
-            gpu.device
-                .allocate_command_buffers(&allocate_info)
-                .expect("Failed to allocate command buffer.")
-        };
-        let command_buffer = command_buffers[0];
-
-        let begin_info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-        unsafe {
-            gpu.device
-                .begin_command_buffer(command_buffer, &begin_info)
-                .expect("Failed to begin command buffer.");
-
-            let copy_regions = [vk::BufferCopy {
-                src_offset: 0,
-                dst_offset: 0,
-                size: buffer_size,
-            }];
-
-            gpu.device
-                .cmd_copy_buffer(command_buffer, staging_buffer, buffer, &copy_regions);
-
-            gpu.device
-                .end_command_buffer(command_buffer)
-                .expect("Failed to end command buffer");
-        }
-
-        let submit_info = [vk::SubmitInfo {
-            command_buffer_count: command_buffers.len() as u32,
-            p_command_buffers: command_buffers.as_ptr(),
-            ..Default::default()
-        }];
-
-        unsafe {
-            gpu.device
-                .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
-                .expect("Failed to Submit Queue.");
-            gpu.device
-                .queue_wait_idle(gpu.graphics_queue)
-                .expect("Failed to wait Queue idle");
-
-            gpu.device
-                .free_command_buffers(command_pool, &command_buffers);
-        }
-    }
-
-    unsafe {
-        gpu.device.destroy_buffer(staging_buffer, None);
-        gpu.device.free_memory(staging_buffer_memory, None);
-    }
-
-    (buffer, buffer_memory)
-}
-
-// This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`
-// member expects a *u32, but `include_bytes!()` produces a Vec<u8>.
-// TODO: Investigate how to properly address this.
-#[allow(clippy::cast_ptr_alignment)]
-fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
-    let shader_module_create_info = vk::ShaderModuleCreateInfo {
-        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::ShaderModuleCreateFlags::empty(),
-        code_size: code.len(),
-        p_code: code.as_ptr() as *const u32,
-    };
-
-    unsafe {
-        device
-            .create_shader_module(&shader_module_create_info, None)
-            .expect("Failed to create shader module.")
-    }
-}
-
-impl VulkanApp {
+impl Context {
     pub fn recreate_resolution_dependent_state(&mut self) {
         unsafe {
             self.gpu
@@ -269,7 +80,7 @@ impl VulkanApp {
         );
     }
 
-    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
+    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Context {
         const APP_NAME: &str = "";
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
@@ -308,7 +119,7 @@ impl VulkanApp {
                 for layer in validation_layers.iter() {
                     let is_layer_found = layer_props
                         .iter()
-                        .any(|&prop| tools::vk_to_string(&prop.layer_name) == *layer);
+                        .any(|&prop| vk_to_string(&prop.layer_name) == *layer);
                     if !is_layer_found {
                         panic!(
                             "Validation layer '{}' requested, but not found. \
@@ -396,7 +207,7 @@ impl VulkanApp {
                 let are_exts_supported = {
                     let available_exts: Vec<String> = exts
                         .iter()
-                        .map(|&ext| tools::vk_to_string(&ext.extension_name))
+                        .map(|&ext| vk_to_string(&ext.extension_name))
                         .collect();
 
                     device_extensions.iter().all(|required_ext| {
@@ -744,7 +555,7 @@ impl VulkanApp {
             &ext_swapchain,
         );
 
-        VulkanApp {
+        Context {
             window,
             _entry: entry,
             instance,
@@ -908,53 +719,7 @@ impl VulkanApp {
 
         self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
     }
-}
 
-impl Drop for VulkanApp {
-    fn drop(&mut self) {
-        unsafe {
-            self.gpu
-                .device
-                .destroy_command_pool(self.command_pool, None);
-
-            self.apparatus.destroy(&self.gpu, &self.ext_swapchain);
-
-            // Uniform buffer
-            self.gpu
-                .device
-                .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
-            self.gpu
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-
-            for i in 0..self.uniform_buffers.len() {
-                self.gpu
-                    .device
-                    .destroy_buffer(self.uniform_buffers[i], None);
-                self.gpu
-                    .device
-                    .free_memory(self.uniform_buffers_memory[i], None);
-            }
-            // Vertex buffer
-            self.gpu.device.destroy_buffer(self.vertex_buffer, None);
-            self.gpu.device.free_memory(self.vertex_buffer_memory, None);
-            // Index buffer
-            self.gpu.device.destroy_buffer(self.index_buffer, None);
-            self.gpu.device.free_memory(self.index_buffer_memory, None);
-
-            self.gpu.device.destroy_device(None);
-            self.ext_surface.destroy_surface(self.surface, None);
-
-            if !self.validation_layers.is_empty() {
-                self.ext_debug_utils
-                    .destroy_debug_utils_messenger(self.debug_messenger, None);
-            }
-            self.instance.destroy_instance(None);
-        }
-    }
-}
-
-impl VulkanApp {
     pub fn main_loop(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, _, control_flow| match event {
             Event::WindowEvent { event, .. } => match event {
@@ -1002,9 +767,89 @@ impl VulkanApp {
     }
 }
 
-fn main() {
-    let event_loop = EventLoop::new();
+impl Drop for Context {
+    fn drop(&mut self) {
+        unsafe {
+            self.gpu
+                .device
+                .destroy_command_pool(self.command_pool, None);
 
-    let vulkan_app = VulkanApp::new(&event_loop);
-    vulkan_app.main_loop(event_loop);
+            self.apparatus.destroy(&self.gpu, &self.ext_swapchain);
+
+            // Uniform buffer
+            self.gpu
+                .device
+                .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
+            self.gpu
+                .device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+
+            for i in 0..self.uniform_buffers.len() {
+                self.gpu
+                    .device
+                    .destroy_buffer(self.uniform_buffers[i], None);
+                self.gpu
+                    .device
+                    .free_memory(self.uniform_buffers_memory[i], None);
+            }
+            // Vertex buffer
+            self.gpu.device.destroy_buffer(self.vertex_buffer, None);
+            self.gpu.device.free_memory(self.vertex_buffer_memory, None);
+            // Index buffer
+            self.gpu.device.destroy_buffer(self.index_buffer, None);
+            self.gpu.device.free_memory(self.index_buffer_memory, None);
+
+            self.gpu.device.destroy_device(None);
+            self.ext_surface.destroy_surface(self.surface, None);
+
+            if !self.validation_layers.is_empty() {
+                self.ext_debug_utils
+                    .destroy_debug_utils_messenger(self.debug_messenger, None);
+            }
+            self.instance.destroy_instance(None);
+        }
+    }
+}
+
+// Debug callbacks
+unsafe extern "system" fn vulkan_debug_utils_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut c_void,
+) -> vk::Bool32 {
+    let severity = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[Verbose]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[Warning]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[Error]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[Info]",
+        _ => "[Unknown]",
+    };
+    let types = match message_type {
+        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General]",
+        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]",
+        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]",
+        _ => "[Unknown]",
+    };
+    let message = CStr::from_ptr((*p_callback_data).p_message);
+    println!("[Debug]{}{}{:?}", severity, types, message);
+
+    vk::FALSE
+}
+
+pub fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEXT {
+    vk::DebugUtilsMessengerCreateInfoEXT {
+        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        p_next: ptr::null(),
+        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+        pfn_user_callback: Some(vulkan_debug_utils_callback),
+        p_user_data: ptr::null_mut(),
+    }
 }
