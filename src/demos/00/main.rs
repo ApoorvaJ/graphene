@@ -12,7 +12,7 @@ struct UniformBuffer {
 
 fn main() {
     let ctx = grapheme::Context::new(std::mem::size_of::<UniformBuffer>());
-    ctx.run_loop(|ctx, elapsed_seconds, frame_idx| {
+    ctx.run_loop(move |ctx, elapsed_seconds, frame_idx| {
         // Update uniform buffer
         let extent = &ctx.apparatus.swapchain_extent;
         let ubos = [UniformBuffer {

@@ -591,9 +591,9 @@ impl Context {
         }
     }
 
-    fn draw_frame<F>(&mut self, on_draw: F)
+    fn draw_frame<F>(&mut self, on_draw: &mut F)
     where
-        F: Fn(&mut Context, f32, usize),
+        F: FnMut(&mut Context, f32, usize),
     {
         let wait_fences = [self.apparatus.command_buffer_complete_fences[self.current_frame]];
 
@@ -689,9 +689,9 @@ impl Context {
         self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
     }
 
-    pub fn run_loop<F: 'static>(mut self, on_draw: F)
+    pub fn run_loop<F: 'static>(mut self, mut on_draw: F)
     where
-        F: Fn(&mut Context, f32, usize),
+        F: FnMut(&mut Context, f32, usize),
     {
         self.event_loop
             .take()
@@ -727,7 +727,7 @@ impl Context {
                     self.window.request_redraw();
                 }
                 Event::RedrawRequested(_window_id) => {
-                    self.draw_frame(&on_draw);
+                    self.draw_frame(&mut on_draw);
                 }
                 Event::LoopDestroyed => {
                     unsafe {
