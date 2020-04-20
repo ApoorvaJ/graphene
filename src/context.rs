@@ -38,23 +38,23 @@ pub struct Context {
     ext_surface: ash::extensions::khr::Surface,
     ext_swapchain: ash::extensions::khr::Swapchain,
 
-    gpu: Gpu,
-    command_pool: vk::CommandPool,
-    vertex_buffer: vk::Buffer,
-    vertex_buffer_memory: vk::DeviceMemory,
-    index_buffer: vk::Buffer,
-    index_buffer_memory: vk::DeviceMemory,
-    num_indices: u32,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
-    uniform_buffer_layout: vk::DescriptorSetLayout,
-    uniform_buffers: Vec<vk::Buffer>,
-    uniform_buffers_memory: Vec<vk::DeviceMemory>,
-    apparatus: Apparatus, // Resolution-dependent apparatus
+    pub gpu: Gpu,
+    pub command_pool: vk::CommandPool,
+    pub vertex_buffer: vk::Buffer,
+    pub vertex_buffer_memory: vk::DeviceMemory,
+    pub index_buffer: vk::Buffer,
+    pub index_buffer_memory: vk::DeviceMemory,
+    pub num_indices: u32,
+    pub descriptor_pool: vk::DescriptorPool,
+    pub descriptor_sets: Vec<vk::DescriptorSet>,
+    pub uniform_buffer_layout: vk::DescriptorSetLayout,
+    pub uniform_buffers: Vec<vk::Buffer>,
+    pub uniform_buffers_memory: Vec<vk::DeviceMemory>,
+    pub apparatus: Apparatus, // Resolution-dependent apparatus
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
-    current_frame: usize,
+    pub current_frame: usize,
     start_instant: std::time::Instant,
 }
 
@@ -82,7 +82,7 @@ impl Context {
         );
     }
 
-    pub fn new() -> Context {
+    pub fn new(uniform_buffer_size: usize) -> Context {
         const APP_NAME: &str = "";
         const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
@@ -463,15 +463,13 @@ impl Context {
 
         // # Create the uniform buffer
         let (uniform_buffers, uniform_buffers_memory) = {
-            let buffer_size = std::mem::size_of::<UniformBuffer>();
-
             let mut uniform_buffers = vec![];
             let mut uniform_buffers_memory = vec![];
 
             for _ in 0..NUM_FRAMES {
                 let (uniform_buffer, uniform_buffer_memory) = create_buffer(
                     &gpu,
-                    buffer_size as u64,
+                    uniform_buffer_size as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                 );
@@ -521,7 +519,7 @@ impl Context {
                 let descriptor_buffer_info = [vk::DescriptorBufferInfo {
                     buffer: uniform_buffers[i],
                     offset: 0,
-                    range: std::mem::size_of::<UniformBuffer>() as u64,
+                    range: uniform_buffer_size as u64,
                 }];
 
                 let descriptor_write_sets = [vk::WriteDescriptorSet {
@@ -593,7 +591,10 @@ impl Context {
         }
     }
 
-    fn draw_frame(&mut self) {
+    fn draw_frame<F>(&mut self, on_draw: F)
+    where
+        F: Fn(&mut Context, f32, usize),
+    {
         let wait_fences = [self.apparatus.command_buffer_complete_fences[self.current_frame]];
 
         let (image_index, _is_sub_optimal) = unsafe {
@@ -624,45 +625,8 @@ impl Context {
             }
         };
 
-        // Update uniform buffer
-        {
-            let seconds_since_start = self.start_instant.elapsed().as_secs_f32();
-            let extent = &self.apparatus.swapchain_extent;
-            let ubos = [UniformBuffer {
-                mtx_world_to_clip: Mat4::perspective_lh(
-                    60.0 * DEGREES_TO_RADIANS,
-                    extent.width as f32 / extent.height as f32,
-                    0.01,
-                    100.0,
-                ) * Mat4::from_translation(Vec3::new(0.0, 0.0, 4.0))
-                    * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS)
-                    * Mat4::from_rotation_y(
-                        (160.0 + 20.0 * seconds_since_start) * DEGREES_TO_RADIANS,
-                    )
-                    * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS),
-            }];
-
-            let buffer_size = (std::mem::size_of::<UniformBuffer>() * ubos.len()) as u64;
-
-            unsafe {
-                let data_ptr =
-                    self.gpu
-                        .device
-                        .map_memory(
-                            self.uniform_buffers_memory[image_index as usize],
-                            0,
-                            buffer_size,
-                            vk::MemoryMapFlags::empty(),
-                        )
-                        .expect("Failed to map memory.") as *mut UniformBuffer;
-
-                data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
-
-                self.gpu
-                    .device
-                    .unmap_memory(self.uniform_buffers_memory[image_index as usize]);
-            }
-        }
+        let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
+        on_draw(self, elapsed_seconds, image_index as usize);
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.apparatus.image_available_semaphores[self.current_frame]];
@@ -725,7 +689,10 @@ impl Context {
         self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
     }
 
-    pub fn run_loop(mut self) {
+    pub fn run_loop<F: 'static>(mut self, on_draw: F)
+    where
+        F: Fn(&mut Context, f32, usize),
+    {
         self.event_loop
             .take()
             .unwrap()
@@ -760,7 +727,7 @@ impl Context {
                     self.window.request_redraw();
                 }
                 Event::RedrawRequested(_window_id) => {
-                    self.draw_frame();
+                    self.draw_frame(&on_draw);
                 }
                 Event::LoopDestroyed => {
                     unsafe {

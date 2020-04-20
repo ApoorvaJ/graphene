@@ -5,33 +5,25 @@ mod platforms;
 
 use ash::version::DeviceV1_0;
 use ash::vk;
-use glam::*;
-use std::f32::consts::PI;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::ptr;
 
 const NUM_FRAMES: usize = 2;
-const DEGREES_TO_RADIANS: f32 = PI / 180.0;
-
-#[allow(dead_code)]
-struct UniformBuffer {
-    mtx_world_to_clip: Mat4,
-}
 
 pub struct Gpu {
     // Physical device
-    physical_device: vk::PhysicalDevice,
-    _exts: Vec<vk::ExtensionProperties>,
-    present_modes: Vec<vk::PresentModeKHR>,
-    memory_properties: vk::PhysicalDeviceMemoryProperties,
-    _properties: vk::PhysicalDeviceProperties,
-    graphics_queue_idx: u32,
-    present_queue_idx: u32,
+    pub physical_device: vk::PhysicalDevice,
+    pub _exts: Vec<vk::ExtensionProperties>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
+    pub memory_properties: vk::PhysicalDeviceMemoryProperties,
+    pub _properties: vk::PhysicalDeviceProperties,
+    pub graphics_queue_idx: u32,
+    pub present_queue_idx: u32,
     // Logical device
-    device: ash::Device,
-    graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
+    pub device: ash::Device,
+    pub graphics_queue: vk::Queue,
+    pub present_queue: vk::Queue,
 }
 
 fn create_buffer(
