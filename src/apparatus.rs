@@ -23,9 +23,6 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
 // Resolution-dependent rendering stuff.
 // TODO: Find a better name for this?
 pub struct Apparatus {
-    // - Surface capabilities and formats
-    pub _surface_caps: vk::SurfaceCapabilitiesKHR,
-    pub _surface_formats: Vec<vk::SurfaceFormatKHR>,
     // - Swapchain
     pub swapchain: vk::SwapchainKHR,
     pub _swapchain_format: vk::Format,
@@ -153,54 +150,41 @@ impl Apparatus {
         num_indices: u32,
         uniform_buffer_layout: vk::DescriptorSetLayout,
         descriptor_sets: &[vk::DescriptorSet],
-        ext_surface: &ash::extensions::khr::Surface,
         ext_swapchain: &ash::extensions::khr::Swapchain,
     ) -> Apparatus {
-        let surface_caps = unsafe {
-            ext_surface
-                .get_physical_device_surface_capabilities(gpu.physical_device, surface)
-                .expect("Failed to query for surface capabilities.")
-        };
-
-        let surface_formats = unsafe {
-            ext_surface
-                .get_physical_device_surface_formats(gpu.physical_device, surface)
-                .expect("Failed to query for surface formats.")
-        };
-
         // # Create swapchain
         let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
             // Set number of images in swapchain
-            let image_count = surface_caps.min_image_count.max(NUM_FRAMES as u32);
+            let image_count = gpu.surface_caps.min_image_count.max(NUM_FRAMES as u32);
 
             // Choose swapchain format (i.e. color buffer format)
             let (swapchain_format, swapchain_color_space) = {
                 let surface_format: vk::SurfaceFormatKHR = {
-                    *surface_formats
+                    *gpu.surface_formats
                         .iter()
                         .find(|&f| {
                             f.format == vk::Format::B8G8R8A8_SRGB
                                 && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
                         })
-                        .unwrap_or(&surface_formats[0])
+                        .unwrap_or(&gpu.surface_formats[0])
                 };
                 (surface_format.format, surface_format.color_space)
             };
 
             // Choose extent
             let extent = {
-                if surface_caps.current_extent.width == u32::max_value() {
+                if gpu.surface_caps.current_extent.width == u32::max_value() {
                     let window_size = window.inner_size();
                     vk::Extent2D {
                         width: (window_size.width as u32)
-                            .max(surface_caps.min_image_extent.width)
-                            .min(surface_caps.max_image_extent.width),
+                            .max(gpu.surface_caps.min_image_extent.width)
+                            .min(gpu.surface_caps.max_image_extent.width),
                         height: (window_size.height as u32)
-                            .max(surface_caps.min_image_extent.height)
-                            .min(surface_caps.max_image_extent.height),
+                            .max(gpu.surface_caps.min_image_extent.height)
+                            .min(gpu.surface_caps.max_image_extent.height),
                     }
                 } else {
-                    surface_caps.current_extent
+                    gpu.surface_caps.current_extent
                 }
             };
 
@@ -709,8 +693,6 @@ impl Apparatus {
         };
 
         Apparatus {
-            _surface_caps: surface_caps,
-            _surface_formats: surface_formats,
             swapchain,
             _swapchain_format: swapchain_format,
             swapchain_extent,

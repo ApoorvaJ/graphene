@@ -77,7 +77,6 @@ impl Context {
             self.num_indices,
             self.uniform_buffer_layout,
             &self.descriptor_sets,
-            &self.ext_surface,
             &self.ext_swapchain,
         );
     }
@@ -346,8 +345,19 @@ impl Context {
             let graphics_queue = unsafe { device.get_device_queue(cgpu.graphics_queue_idx, 0) };
             let present_queue = unsafe { device.get_device_queue(cgpu.present_queue_idx, 0) };
 
+            let surface_caps = unsafe {
+                ext_surface
+                    .get_physical_device_surface_capabilities(cgpu.physical_device, surface)
+                    .expect("Failed to query for surface capabilities.")
+            };
+
+            let surface_formats = unsafe {
+                ext_surface
+                    .get_physical_device_surface_formats(cgpu.physical_device, surface)
+                    .expect("Failed to query for surface formats.")
+            };
+
             Gpu {
-                // Physical device
                 physical_device: cgpu.physical_device,
                 _exts: cgpu.exts.clone(),
                 present_modes: cgpu.present_modes.clone(),
@@ -355,10 +365,11 @@ impl Context {
                 _properties: cgpu.properties,
                 graphics_queue_idx: cgpu.graphics_queue_idx,
                 present_queue_idx: cgpu.present_queue_idx,
-                // Logical device
                 device,
                 graphics_queue,
                 present_queue,
+                surface_caps,
+                surface_formats,
             }
         };
 
@@ -552,7 +563,6 @@ impl Context {
             indices_data.len() as u32,
             uniform_buffer_layout,
             &descriptor_sets,
-            &ext_surface,
             &ext_swapchain,
         );
 

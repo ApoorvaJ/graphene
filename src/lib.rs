@@ -1,5 +1,6 @@
-mod apparatus;
+pub mod apparatus;
 pub mod context;
+pub mod surface;
 pub use context::*;
 mod platforms;
 
@@ -24,6 +25,9 @@ pub struct Gpu {
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
+    // Surface info
+    pub surface_caps: vk::SurfaceCapabilitiesKHR,
+    pub surface_formats: Vec<vk::SurfaceFormatKHR>,
 }
 
 fn create_buffer(
