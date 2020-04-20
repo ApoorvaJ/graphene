@@ -63,6 +63,7 @@ struct VulkanApp {
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
     current_frame: usize,
+    start_instant: std::time::Instant,
 }
 
 #[allow(dead_code)]
@@ -772,6 +773,7 @@ impl VulkanApp {
             validation_layers,
 
             current_frame: 0,
+            start_instant: std::time::Instant::now(),
         }
     }
 
@@ -808,6 +810,7 @@ impl VulkanApp {
 
         // Update uniform buffer
         {
+            let seconds_since_start = self.start_instant.elapsed().as_secs_f32();
             let extent = &self.apparatus.swapchain_extent;
             let ubos = [UniformBuffer {
                 mtx_world_to_clip: Mat4::perspective_lh(
@@ -817,7 +820,9 @@ impl VulkanApp {
                     100.0,
                 ) * Mat4::from_translation(Vec3::new(0.0, 0.0, 4.0))
                     * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS)
-                    * Mat4::from_rotation_y(160.0 * DEGREES_TO_RADIANS)
+                    * Mat4::from_rotation_y(
+                        (160.0 + 20.0 * seconds_since_start) * DEGREES_TO_RADIANS,
+                    )
                     * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS),
             }];
 
