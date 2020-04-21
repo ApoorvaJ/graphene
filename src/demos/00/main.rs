@@ -16,7 +16,7 @@ fn main() {
 
     ctx.run_loop(move |ctx, elapsed_seconds, frame_idx| {
         // Update uniform buffer
-        let extent = &ctx.apparatus.swapchain_extent;
+        let extent = &ctx.facade.swapchain_extent;
         let ubos = [UniformBuffer {
             mtx_world_to_clip: Mat4::perspective_lh(
                 60.0 * DEGREES_TO_RADIANS,

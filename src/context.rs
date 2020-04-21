@@ -1,4 +1,3 @@
-use crate::apparatus::*;
 use crate::*;
 
 use ash::version::DeviceV1_0;
@@ -50,7 +49,8 @@ pub struct Context {
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
     pub uniform_buffers: Vec<vk::Buffer>,
     pub uniform_buffers_memory: Vec<vk::DeviceMemory>,
-    pub apparatus: Apparatus, // Resolution-dependent apparatus
+    pub facade: Facade, // Resolution-dependent apparatus
+    pub apparatus: Apparatus,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
@@ -66,18 +66,18 @@ impl Context {
                 .device_wait_idle()
                 .expect("Failed to wait device idle!")
         };
-        self.apparatus.destroy(&self.gpu, &self.ext_swapchain);
+        self.facade.destroy(&self.gpu, &self.ext_swapchain);
+        self.facade = Facade::new(&self.window, self.surface, &self.gpu, &self.ext_swapchain);
+        self.apparatus.destroy(&self.gpu);
         self.apparatus = Apparatus::new(
-            &self.window,
-            self.surface,
             &self.gpu,
+            &self.facade,
             self.command_pool,
             self.vertex_buffer,
             self.index_buffer,
             self.num_indices,
             self.uniform_buffer_layout,
             &self.descriptor_sets,
-            &self.ext_swapchain,
         );
     }
 
@@ -552,18 +552,17 @@ impl Context {
             descriptor_sets
         };
 
-        // # Set up the apparatus
+        let facade = Facade::new(&window, surface, &gpu, &ext_swapchain);
+
         let apparatus = Apparatus::new(
-            &window,
-            surface,
             &gpu,
+            &facade,
             command_pool,
             vertex_buffer,
             index_buffer,
             indices_data.len() as u32,
             uniform_buffer_layout,
             &descriptor_sets,
-            &ext_swapchain,
         );
 
         Context {
@@ -579,6 +578,7 @@ impl Context {
             ext_swapchain,
             // - Device
             gpu,
+            facade,
             command_pool,
             vertex_buffer,
             vertex_buffer_memory,
@@ -605,7 +605,7 @@ impl Context {
     where
         F: FnMut(&mut Context, f32, usize),
     {
-        let wait_fences = [self.apparatus.command_buffer_complete_fences[self.current_frame]];
+        let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
 
         let (image_index, _is_sub_optimal) = unsafe {
             self.gpu
@@ -614,9 +614,9 @@ impl Context {
                 .expect("Failed to wait for Fence.");
 
             let result = self.ext_swapchain.acquire_next_image(
-                self.apparatus.swapchain,
+                self.facade.swapchain,
                 std::u64::MAX,
-                self.apparatus.image_available_semaphores[self.current_frame],
+                self.facade.image_available_semaphores[self.current_frame],
                 vk::Fence::null(),
             );
             match result {
@@ -639,8 +639,8 @@ impl Context {
         on_draw(self, elapsed_seconds, image_index as usize);
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let wait_semaphores = [self.apparatus.image_available_semaphores[self.current_frame]];
-        let signal_semaphores = [self.apparatus.render_finished_semaphores[self.current_frame]];
+        let wait_semaphores = [self.facade.image_available_semaphores[self.current_frame]];
+        let signal_semaphores = [self.facade.render_finished_semaphores[self.current_frame]];
         let command_buffers = [self.apparatus.command_buffers[image_index as usize]];
 
         let submit_infos = [vk::SubmitInfo {
@@ -665,12 +665,12 @@ impl Context {
                 .queue_submit(
                     self.gpu.graphics_queue,
                     &submit_infos,
-                    self.apparatus.command_buffer_complete_fences[self.current_frame],
+                    self.facade.command_buffer_complete_fences[self.current_frame],
                 )
                 .expect("Failed to execute queue submit.");
         }
 
-        let swapchains = [self.apparatus.swapchain];
+        let swapchains = [self.facade.swapchain];
         let image_indices = [image_index];
 
         let present_info = vk::PresentInfoKHR::builder()
@@ -710,8 +710,8 @@ impl Context {
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(physical_size) => {
-                        if self.apparatus.swapchain_extent.width != physical_size.width
-                            || self.apparatus.swapchain_extent.height != physical_size.height
+                        if self.facade.swapchain_extent.width != physical_size.width
+                            || self.facade.swapchain_extent.height != physical_size.height
                         {
                             self.recreate_resolution_dependent_state();
                         }
@@ -759,7 +759,8 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            self.apparatus.destroy(&self.gpu, &self.ext_swapchain);
+            self.facade.destroy(&self.gpu, &self.ext_swapchain);
+            self.apparatus.destroy(&self.gpu);
 
             // Uniform buffer
             self.gpu

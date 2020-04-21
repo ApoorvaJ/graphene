@@ -1,7 +1,10 @@
 pub mod apparatus;
+pub use apparatus::*;
 pub mod context;
-pub mod surface;
 pub use context::*;
+pub use context::*;
+pub mod facade;
+pub use facade::*;
 mod platforms;
 
 use ash::version::DeviceV1_0;
