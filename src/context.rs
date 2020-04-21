@@ -25,6 +25,21 @@ fn vk_to_string(raw_string_array: &[c_char]) -> String {
         .to_owned()
 }
 
+pub struct Gpu {
+    // Physical device
+    pub physical_device: vk::PhysicalDevice,
+    pub _exts: Vec<vk::ExtensionProperties>,
+    pub present_modes: Vec<vk::PresentModeKHR>,
+    pub memory_properties: vk::PhysicalDeviceMemoryProperties,
+    pub _properties: vk::PhysicalDeviceProperties,
+    pub graphics_queue_idx: u32,
+    pub present_queue_idx: u32,
+    // Logical device
+    pub device: ash::Device,
+    pub graphics_queue: vk::Queue,
+    pub present_queue: vk::Queue,
+}
+
 pub struct Context {
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
@@ -56,6 +71,7 @@ pub struct Context {
     validation_layers: Vec<String>,
     pub current_frame: usize,
     start_instant: std::time::Instant,
+    asset_watch_receiver: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
 }
 
 impl Context {
@@ -557,6 +573,16 @@ impl Context {
             &descriptor_sets,
         );
 
+        // Add expect messages to all these unwraps
+        let asset_watch_receiver = {
+            use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut watcher: RecommendedWatcher =
+                Watcher::new_immediate(move |res| tx.send(res).unwrap()).unwrap();
+            watcher.watch("assets/", RecursiveMode::Recursive).unwrap();
+            rx
+        };
+
         Context {
             window,
             event_loop: Some(event_loop),
@@ -590,6 +616,7 @@ impl Context {
 
             current_frame: 0,
             start_instant: std::time::Instant::now(),
+            asset_watch_receiver,
         }
     }
 
@@ -626,6 +653,11 @@ impl Context {
                 }
             }
         };
+
+        for watch_result in self.asset_watch_receiver.try_iter() {
+            let watch_event = watch_result.expect("Asset directory watch failed");
+            println!("Watch event: {:?}", watch_event);
+        }
 
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
         on_draw(self, elapsed_seconds, image_index as usize);

@@ -13,6 +13,7 @@ image = "0.22"
 glam = "0.8.6"
 gltf = "0.15"
 memoffset = "0.5.1" #TODO: Consider removing dependency
+notify = "5.0.0-pre.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.5", features = ["windef", "libloaderapi"] }

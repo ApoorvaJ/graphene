@@ -15,21 +15,6 @@ use std::ptr;
 
 const NUM_FRAMES: usize = 2;
 
-pub struct Gpu {
-    // Physical device
-    pub physical_device: vk::PhysicalDevice,
-    pub _exts: Vec<vk::ExtensionProperties>,
-    pub present_modes: Vec<vk::PresentModeKHR>,
-    pub memory_properties: vk::PhysicalDeviceMemoryProperties,
-    pub _properties: vk::PhysicalDeviceProperties,
-    pub graphics_queue_idx: u32,
-    pub present_queue_idx: u32,
-    // Logical device
-    pub device: ash::Device,
-    pub graphics_queue: vk::Queue,
-    pub present_queue: vk::Queue,
-}
-
 fn create_buffer(
     gpu: &Gpu,
     size: vk::DeviceSize,
