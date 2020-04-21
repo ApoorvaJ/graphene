@@ -71,7 +71,9 @@ pub struct Context {
     validation_layers: Vec<String>,
     pub current_frame: usize,
     start_instant: std::time::Instant,
-    asset_watch_receiver: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
+
+    _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
+    watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 }
 
 impl Context {
@@ -574,13 +576,15 @@ impl Context {
         );
 
         // Add expect messages to all these unwraps
-        let asset_watch_receiver = {
+        let (watcher, watch_rx) = {
             use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-            let (tx, rx) = std::sync::mpsc::channel();
-            let mut watcher: RecommendedWatcher =
-                Watcher::new_immediate(move |res| tx.send(res).unwrap()).unwrap();
-            watcher.watch("assets/", RecursiveMode::Recursive).unwrap();
-            rx
+            use std::sync::mpsc::channel;
+            use std::time::Duration;
+
+            let (tx, rx) = channel();
+            let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(2)).unwrap();
+            watcher.watch("./assets", RecursiveMode::Recursive).unwrap();
+            (watcher, rx)
         };
 
         Context {
@@ -616,7 +620,9 @@ impl Context {
 
             current_frame: 0,
             start_instant: std::time::Instant::now(),
-            asset_watch_receiver,
+
+            _watcher: watcher,
+            watch_rx,
         }
     }
 
@@ -654,9 +660,8 @@ impl Context {
             }
         };
 
-        for watch_result in self.asset_watch_receiver.try_iter() {
-            let watch_event = watch_result.expect("Asset directory watch failed");
-            println!("Watch event: {:?}", watch_event);
+        for event in self.watch_rx.try_iter() {
+            println!("> {:?}", event);
         }
 
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
