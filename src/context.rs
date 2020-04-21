@@ -66,9 +66,15 @@ impl Context {
                 .device_wait_idle()
                 .expect("Failed to wait device idle!")
         };
-        self.facade.destroy(&self.gpu, &self.ext_swapchain);
-        self.facade = Facade::new(&self.window, self.surface, &self.gpu, &self.ext_swapchain);
         self.apparatus.destroy(&self.gpu);
+        self.facade.destroy(&self.gpu, &self.ext_swapchain);
+        self.facade = Facade::new(
+            &self.window,
+            self.surface,
+            &self.gpu,
+            &self.ext_surface,
+            &self.ext_swapchain,
+        );
         self.apparatus = Apparatus::new(
             &self.gpu,
             &self.facade,
@@ -345,18 +351,6 @@ impl Context {
             let graphics_queue = unsafe { device.get_device_queue(cgpu.graphics_queue_idx, 0) };
             let present_queue = unsafe { device.get_device_queue(cgpu.present_queue_idx, 0) };
 
-            let surface_caps = unsafe {
-                ext_surface
-                    .get_physical_device_surface_capabilities(cgpu.physical_device, surface)
-                    .expect("Failed to query for surface capabilities.")
-            };
-
-            let surface_formats = unsafe {
-                ext_surface
-                    .get_physical_device_surface_formats(cgpu.physical_device, surface)
-                    .expect("Failed to query for surface formats.")
-            };
-
             Gpu {
                 physical_device: cgpu.physical_device,
                 _exts: cgpu.exts.clone(),
@@ -368,8 +362,6 @@ impl Context {
                 device,
                 graphics_queue,
                 present_queue,
-                surface_caps,
-                surface_formats,
             }
         };
 
@@ -552,7 +544,7 @@ impl Context {
             descriptor_sets
         };
 
-        let facade = Facade::new(&window, surface, &gpu, &ext_swapchain);
+        let facade = Facade::new(&window, surface, &gpu, &ext_surface, &ext_swapchain);
 
         let apparatus = Apparatus::new(
             &gpu,

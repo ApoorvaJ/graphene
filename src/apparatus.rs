@@ -20,8 +20,6 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
     }
 }
 
-// Resolution-dependent rendering stuff.
-// TODO: Find a better name for this?
 pub struct Apparatus {
     pub render_pass: vk::RenderPass,
     pub framebuffers: Vec<vk::Framebuffer>,

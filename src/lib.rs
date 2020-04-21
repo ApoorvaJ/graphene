@@ -28,9 +28,6 @@ pub struct Gpu {
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
-    // Surface info
-    pub surface_caps: vk::SurfaceCapabilitiesKHR,
-    pub surface_formats: Vec<vk::SurfaceFormatKHR>,
 }
 
 fn create_buffer(

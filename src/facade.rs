@@ -1,6 +1,9 @@
 use crate::*;
 
 pub struct Facade {
+    // Surface info. Changes with resolution.
+    pub surface_caps: vk::SurfaceCapabilitiesKHR,
+    pub surface_formats: Vec<vk::SurfaceFormatKHR>,
     // - Swapchain
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_format: vk::Format,
@@ -116,41 +119,55 @@ impl Facade {
         window: &winit::window::Window,
         surface: vk::SurfaceKHR,
         gpu: &Gpu,
+        ext_surface: &ash::extensions::khr::Surface,
         ext_swapchain: &ash::extensions::khr::Swapchain,
     ) -> Facade {
+        // # Get surface info
+        let surface_caps = unsafe {
+            ext_surface
+                .get_physical_device_surface_capabilities(gpu.physical_device, surface)
+                .expect("Failed to query for surface capabilities.")
+        };
+
+        let surface_formats = unsafe {
+            ext_surface
+                .get_physical_device_surface_formats(gpu.physical_device, surface)
+                .expect("Failed to query for surface formats.")
+        };
+
         // # Create swapchain
         let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
             // Set number of images in swapchain
-            let image_count = gpu.surface_caps.min_image_count.max(NUM_FRAMES as u32);
+            let image_count = surface_caps.min_image_count.max(NUM_FRAMES as u32);
 
             // Choose swapchain format (i.e. color buffer format)
             let (swapchain_format, swapchain_color_space) = {
                 let surface_format: vk::SurfaceFormatKHR = {
-                    *gpu.surface_formats
+                    *surface_formats
                         .iter()
                         .find(|&f| {
                             f.format == vk::Format::B8G8R8A8_SRGB
                                 && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
                         })
-                        .unwrap_or(&gpu.surface_formats[0])
+                        .unwrap_or(&surface_formats[0])
                 };
                 (surface_format.format, surface_format.color_space)
             };
 
             // Choose extent
             let extent = {
-                if gpu.surface_caps.current_extent.width == u32::max_value() {
+                if surface_caps.current_extent.width == u32::max_value() {
                     let window_size = window.inner_size();
                     vk::Extent2D {
                         width: (window_size.width as u32)
-                            .max(gpu.surface_caps.min_image_extent.width)
-                            .min(gpu.surface_caps.max_image_extent.width),
+                            .max(surface_caps.min_image_extent.width)
+                            .min(surface_caps.max_image_extent.width),
                         height: (window_size.height as u32)
-                            .max(gpu.surface_caps.min_image_extent.height)
-                            .min(gpu.surface_caps.max_image_extent.height),
+                            .max(surface_caps.min_image_extent.height)
+                            .min(surface_caps.max_image_extent.height),
                     }
                 } else {
-                    gpu.surface_caps.current_extent
+                    surface_caps.current_extent
                 }
             };
 
@@ -305,6 +322,8 @@ impl Facade {
         };
 
         Facade {
+            surface_caps,
+            surface_formats,
             swapchain,
             swapchain_format,
             swapchain_extent,
