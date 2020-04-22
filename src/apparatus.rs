@@ -1,25 +1,5 @@
 use crate::*;
 
-// This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`
-// member expects a *u32, but `include_bytes!()` produces a Vec<u8>.
-// TODO: Investigate how to properly address this.
-#[allow(clippy::cast_ptr_alignment)]
-fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
-    let shader_module_create_info = vk::ShaderModuleCreateInfo {
-        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
-        p_next: ptr::null(),
-        flags: vk::ShaderModuleCreateFlags::empty(),
-        code_size: code.len(),
-        p_code: code.as_ptr() as *const u32,
-    };
-
-    unsafe {
-        device
-            .create_shader_module(&shader_module_create_info, None)
-            .expect("Failed to create shader module.")
-    }
-}
-
 pub struct Apparatus {
     pub render_pass: vk::RenderPass,
     pub framebuffers: Vec<vk::Framebuffer>,
@@ -40,6 +20,7 @@ impl Apparatus {
         num_indices: u32,
         uniform_buffer_layout: vk::DescriptorSetLayout,
         descriptor_sets: &[vk::DescriptorSet],
+        shader_modules: Vec<vk::ShaderModule>,
     ) -> Apparatus {
         // # Create render pass
         let render_pass = {
@@ -124,27 +105,17 @@ impl Apparatus {
 
         // # Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
-            let vert_shader_module = create_shader_module(
-                &gpu.device,
-                include_bytes!("../shaders/spv/default.vert.spv").to_vec(),
-            );
-            let frag_shader_module = create_shader_module(
-                &gpu.device,
-                include_bytes!("../shaders/spv/default.frag.spv").to_vec(),
-            );
-
             let main_function_name = CString::new("main").unwrap();
-
             let shader_stages = [
                 vk::PipelineShaderStageCreateInfo {
                     stage: vk::ShaderStageFlags::VERTEX,
-                    module: vert_shader_module,
+                    module: shader_modules[0],
                     p_name: main_function_name.as_ptr(),
                     ..Default::default()
                 },
                 vk::PipelineShaderStageCreateInfo {
                     stage: vk::ShaderStageFlags::FRAGMENT,
-                    module: frag_shader_module,
+                    module: shader_modules[1],
                     p_name: main_function_name.as_ptr(),
                     ..Default::default()
                 },
@@ -285,8 +256,9 @@ impl Apparatus {
             };
 
             unsafe {
-                gpu.device.destroy_shader_module(vert_shader_module, None);
-                gpu.device.destroy_shader_module(frag_shader_module, None);
+                for stage in shader_modules {
+                    gpu.device.destroy_shader_module(stage, None);
+                }
             }
 
             (graphics_pipelines[0], pipeline_layout)

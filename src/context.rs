@@ -93,6 +93,7 @@ impl Context {
             &self.ext_surface,
             &self.ext_swapchain,
         );
+        let shader_modules = utils::get_shader_modules(&self.gpu);
         self.apparatus = Apparatus::new(
             &self.gpu,
             &self.facade,
@@ -102,6 +103,7 @@ impl Context {
             self.num_indices,
             self.uniform_buffer_layout,
             &self.descriptor_sets,
+            shader_modules,
         );
     }
 
@@ -564,6 +566,7 @@ impl Context {
 
         let facade = Facade::new(&window, surface, &gpu, &ext_surface, &ext_swapchain);
 
+        let shader_modules = utils::get_shader_modules(&gpu);
         let apparatus = Apparatus::new(
             &gpu,
             &facade,
@@ -573,6 +576,7 @@ impl Context {
             indices_data.len() as u32,
             uniform_buffer_layout,
             &descriptor_sets,
+            shader_modules,
         );
 
         // Add expect messages to all these unwraps
@@ -661,7 +665,13 @@ impl Context {
         };
 
         for event in self.watch_rx.try_iter() {
-            println!("> {:?}", event);
+            use notify::DebouncedEvent::*;
+            match event {
+                Write(_) | Remove(_) | Rename(_, _) => {
+                    println!("> {:?}", event);
+                }
+                _ => (),
+            }
         }
 
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
