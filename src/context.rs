@@ -664,16 +664,6 @@ impl Context {
             }
         };
 
-        for event in self.watch_rx.try_iter() {
-            use notify::DebouncedEvent::*;
-            match event {
-                Write(_) | Remove(_) | Rename(_, _) => {
-                    println!("> {:?}", event);
-                }
-                _ => (),
-            }
-        }
-
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
         on_draw(self, elapsed_seconds, image_index as usize);
 
@@ -732,6 +722,35 @@ impl Context {
                     }
                     _ => panic!("Failed to present queue."),
                 }
+            }
+        }
+
+        for event in self.watch_rx.try_iter() {
+            use notify::DebouncedEvent::*;
+            match event {
+                Write(_) | Remove(_) | Rename(_, _) => {
+                    unsafe {
+                        self.gpu
+                            .device
+                            .device_wait_idle()
+                            .expect("Failed to wait device idle!");
+                    }
+                    self.apparatus.destroy(&self.gpu);
+                    let shader_modules = utils::get_shader_modules(&self.gpu);
+                    // TODO: If shaders have compilation errors, don't recreating the apparatus
+                    self.apparatus = Apparatus::new(
+                        &self.gpu,
+                        &self.facade,
+                        self.command_pool,
+                        self.vertex_buffer,
+                        self.index_buffer,
+                        self.num_indices,
+                        self.uniform_buffer_layout,
+                        &self.descriptor_sets,
+                        shader_modules,
+                    );
+                }
+                _ => (),
             }
         }
 
