@@ -269,7 +269,7 @@ impl Apparatus {
             let info = vk::CommandBufferAllocateInfo::builder()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(NUM_FRAMES as u32);
+                .command_buffer_count(facade.num_frames as u32);
 
             unsafe {
                 gpu.device

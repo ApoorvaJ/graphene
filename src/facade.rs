@@ -5,6 +5,7 @@ pub struct Facade {
     pub surface_caps: vk::SurfaceCapabilitiesKHR,
     pub surface_formats: Vec<vk::SurfaceFormatKHR>,
     // - Swapchain
+    pub num_frames: usize,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
@@ -136,9 +137,9 @@ impl Facade {
         };
 
         // # Create swapchain
-        let (swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
+        let (num_frames, swapchain, swapchain_format, swapchain_extent, swapchain_images) = {
             // Set number of images in swapchain
-            let image_count = surface_caps.min_image_count.max(NUM_FRAMES as u32);
+            let num_frames = surface_caps.min_image_count + 1;
 
             // Choose swapchain format (i.e. color buffer format)
             let (swapchain_format, swapchain_color_space) = {
@@ -172,16 +173,11 @@ impl Facade {
             };
 
             // Present mode
-            let present_mode: vk::PresentModeKHR = {
-                *gpu.present_modes
-                    .iter()
-                    .find(|&&mode| mode == vk::PresentModeKHR::MAILBOX)
-                    .unwrap_or(&vk::PresentModeKHR::FIFO)
-            };
+            let present_mode: vk::PresentModeKHR = vk::PresentModeKHR::FIFO;
 
             let mut info = vk::SwapchainCreateInfoKHR::builder()
                 .surface(surface)
-                .min_image_count(image_count)
+                .min_image_count(num_frames)
                 .image_format(swapchain_format)
                 .image_color_space(swapchain_color_space)
                 .image_extent(extent)
@@ -220,7 +216,7 @@ impl Facade {
                     .expect("Failed to get swapchain images.")
             };
 
-            (swapchain, swapchain_format, extent, images)
+            (num_frames, swapchain, swapchain_format, extent, images)
         };
 
         // # Create swapchain image views
@@ -295,7 +291,7 @@ impl Facade {
             let fence_create_info =
                 vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
-            for _ in 0..NUM_FRAMES {
+            for _ in 0..num_frames {
                 unsafe {
                     image_available_semaphores.push(
                         gpu.device
@@ -324,6 +320,7 @@ impl Facade {
         Facade {
             surface_caps,
             surface_formats,
+            num_frames: num_frames as usize,
             swapchain,
             swapchain_format,
             swapchain_extent,
@@ -341,7 +338,7 @@ impl Facade {
 
     pub fn destroy(&self, gpu: &Gpu, ext_swapchain: &ash::extensions::khr::Swapchain) {
         unsafe {
-            for i in 0..NUM_FRAMES {
+            for i in 0..self.num_frames {
                 gpu.device
                     .destroy_semaphore(self.image_available_semaphores[i], None);
                 gpu.device

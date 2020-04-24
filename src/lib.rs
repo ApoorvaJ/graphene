@@ -16,8 +16,6 @@ use std::ffi::CStr;
 use std::ffi::CString;
 use std::ptr;
 
-const NUM_FRAMES: usize = 2;
-
 fn create_buffer(
     gpu: &Gpu,
     size: vk::DeviceSize,

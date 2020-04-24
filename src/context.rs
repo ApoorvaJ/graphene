@@ -464,6 +464,9 @@ impl Context {
             )
         };
 
+        // TODO: Move this up?
+        let facade = Facade::new(&window, surface, &gpu, &ext_surface, &ext_swapchain);
+
         // # Uniform buffer descriptor layout
         let uniform_buffer_layout = {
             let bindings = [vk::DescriptorSetLayoutBinding {
@@ -489,7 +492,7 @@ impl Context {
             let mut uniform_buffers = vec![];
             let mut uniform_buffers_memory = vec![];
 
-            for _ in 0..NUM_FRAMES {
+            for _ in 0..facade.num_frames {
                 let (uniform_buffer, uniform_buffer_memory) = create_buffer(
                     &gpu,
                     uniform_buffer_size as u64,
@@ -507,11 +510,11 @@ impl Context {
         let descriptor_pool = {
             let pool_sizes = [vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: NUM_FRAMES as u32,
+                descriptor_count: facade.num_frames as u32,
             }];
 
             let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
-                .max_sets(NUM_FRAMES as u32)
+                .max_sets(facade.num_frames as u32)
                 .pool_sizes(&pool_sizes);
 
             unsafe {
@@ -524,7 +527,7 @@ impl Context {
         // # Create descriptor sets
         let descriptor_sets = {
             let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-            for _ in 0..NUM_FRAMES {
+            for _ in 0..facade.num_frames {
                 layouts.push(uniform_buffer_layout);
             }
 
@@ -563,8 +566,6 @@ impl Context {
 
             descriptor_sets
         };
-
-        let facade = Facade::new(&window, surface, &gpu, &ext_surface, &ext_swapchain);
 
         let shader_modules = utils::get_shader_modules(&gpu);
         let apparatus = Apparatus::new(
@@ -754,7 +755,7 @@ impl Context {
             }
         }
 
-        self.current_frame = (self.current_frame + 1) % NUM_FRAMES;
+        self.current_frame = (self.current_frame + 1) % self.facade.num_frames;
     }
 
     pub fn run_loop<F: 'static>(mut self, mut on_draw: F)
