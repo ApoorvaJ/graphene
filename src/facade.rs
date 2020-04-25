@@ -11,82 +11,16 @@ pub struct Facade {
     pub swapchain_extent: vk::Extent2D,
     pub _swapchain_images: Vec<vk::Image>,
     pub swapchain_imageviews: Vec<vk::ImageView>,
-    pub depth_format: vk::Format,
-    pub depth_image: vk::Image,
+    pub depth_texture: Texture,
     pub depth_image_view: vk::ImageView,
-    pub depth_image_memory: vk::DeviceMemory,
     // - Synchronization primitives. these aren't really resolution-dependent
     //   and could technically be moved outside the struct. They are kept here
     //   because they're closely related to the rest of the members.
     pub image_available_semaphores: Vec<vk::Semaphore>,
     pub render_finished_semaphores: Vec<vk::Semaphore>,
     pub command_buffer_complete_fences: Vec<vk::Fence>,
-}
 
-// TODO: Move to a more sensible file
-pub fn create_image(
-    gpu: &Gpu,
-    width: u32,
-    height: u32,
-    mip_levels: u32,
-    num_samples: vk::SampleCountFlags,
-    format: vk::Format,
-    tiling: vk::ImageTiling,
-    usage: vk::ImageUsageFlags,
-    required_memory_properties: vk::MemoryPropertyFlags,
-) -> (vk::Image, vk::DeviceMemory) {
-    let image_create_info = vk::ImageCreateInfo::builder()
-        .image_type(vk::ImageType::TYPE_2D)
-        .format(format)
-        .mip_levels(mip_levels)
-        .array_layers(1)
-        .samples(num_samples)
-        .tiling(tiling)
-        .usage(usage)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE)
-        .extent(vk::Extent3D {
-            width,
-            height,
-            depth: 1,
-        });
-
-    let texture_image = unsafe {
-        gpu.device
-            .create_image(&image_create_info, None)
-            .expect("Failed to create texture image.")
-    };
-
-    let image_memory_requirement =
-        unsafe { gpu.device.get_image_memory_requirements(texture_image) };
-    let memory_type_index = gpu
-        .memory_properties
-        .memory_types
-        .iter()
-        .enumerate()
-        .position(|(i, &memory_type)| {
-            (image_memory_requirement.memory_type_bits & (1 << i)) > 0
-                && memory_type
-                    .property_flags
-                    .contains(required_memory_properties)
-        })
-        .expect("Failed to find suitable memory type.") as u32;
-
-    let memory_allocate_info = vk::MemoryAllocateInfo::builder()
-        .allocation_size(image_memory_requirement.size)
-        .memory_type_index(memory_type_index);
-    let texture_image_memory = unsafe {
-        gpu.device
-            .allocate_memory(&memory_allocate_info, None)
-            .expect("Failed to allocate texture image memory.")
-    };
-
-    unsafe {
-        gpu.device
-            .bind_image_memory(texture_image, texture_image_memory, 0)
-            .expect("Failed to bind image memory.");
-    }
-
-    (texture_image, texture_image_memory)
+    pub ext_swapchain: ash::extensions::khr::Swapchain,
 }
 
 pub fn create_image_view(
@@ -117,12 +51,14 @@ pub fn create_image_view(
 
 impl Facade {
     pub fn new(
+        instance: &ash::Instance,
         window: &winit::window::Window,
         surface: vk::SurfaceKHR,
         gpu: &Gpu,
         ext_surface: &ash::extensions::khr::Surface,
-        ext_swapchain: &ash::extensions::khr::Swapchain,
     ) -> Facade {
+        let ext_swapchain = ash::extensions::khr::Swapchain::new(instance, &gpu.device);
+
         // # Get surface info
         let surface_caps = unsafe {
             ext_surface
@@ -254,28 +190,24 @@ impl Facade {
         };
 
         // # Create depth buffer
-        let depth_format = vk::Format::D32_SFLOAT;
-        let (depth_image, depth_image_view, depth_image_memory) = {
-            let (depth_image, depth_image_memory) = create_image(
+        let (depth_texture, depth_image_view) = {
+            let depth_format = vk::Format::D32_SFLOAT;
+            let depth_texture = Texture::new(
                 &gpu,
                 swapchain_extent.width,
                 swapchain_extent.height,
-                1,
-                vk::SampleCountFlags::TYPE_1,
                 depth_format,
-                vk::ImageTiling::OPTIMAL,
                 vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
             );
             let depth_image_view = create_image_view(
                 &gpu,
-                depth_image,
+                depth_texture.image,
                 depth_format,
                 vk::ImageAspectFlags::DEPTH,
                 1,
             );
 
-            (depth_image, depth_image_view, depth_image_memory)
+            (depth_texture, depth_image_view)
         };
 
         // # Synchronization primitives
@@ -326,17 +258,16 @@ impl Facade {
             swapchain_extent,
             _swapchain_images: swapchain_images,
             swapchain_imageviews,
-            depth_format,
-            depth_image,
+            depth_texture,
             depth_image_view,
-            depth_image_memory,
             image_available_semaphores,
             render_finished_semaphores,
             command_buffer_complete_fences,
+            ext_swapchain,
         }
     }
 
-    pub fn destroy(&self, gpu: &Gpu, ext_swapchain: &ash::extensions::khr::Swapchain) {
+    pub fn destroy(&self, gpu: &Gpu) {
         unsafe {
             for i in 0..self.num_frames {
                 gpu.device
@@ -351,10 +282,9 @@ impl Facade {
             }
 
             gpu.device.destroy_image_view(self.depth_image_view, None);
-            gpu.device.destroy_image(self.depth_image, None);
-            gpu.device.free_memory(self.depth_image_memory, None);
+            self.depth_texture.destroy();
 
-            ext_swapchain.destroy_swapchain(self.swapchain, None);
+            self.ext_swapchain.destroy_swapchain(self.swapchain, None);
         }
     }
 }

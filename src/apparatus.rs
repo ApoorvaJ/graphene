@@ -39,7 +39,7 @@ impl Apparatus {
                 },
                 // Depth attachment
                 vk::AttachmentDescription {
-                    format: facade.depth_format,
+                    format: facade.depth_texture.format,
                     flags: vk::AttachmentDescriptionFlags::empty(),
                     samples: vk::SampleCountFlags::TYPE_1,
                     load_op: vk::AttachmentLoadOp::CLEAR,

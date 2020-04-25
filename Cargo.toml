@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 winit = "0.20.0"
 ash = "0.29.0"
-image = "0.22"
+image = "0.23"
 glam = "0.8.6"
 gltf = "0.15"
 memoffset = "0.5.1" #TODO: Consider removing dependency

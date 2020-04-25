@@ -7,6 +7,8 @@ pub use context::*;
 pub use context::*;
 pub mod facade;
 pub use facade::*;
+pub mod texture;
+pub use texture::*;
 pub mod utils;
 pub use utils::*;
 

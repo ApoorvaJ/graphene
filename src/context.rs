@@ -50,7 +50,6 @@ pub struct Context {
     // - Extensions
     ext_debug_utils: ash::extensions::ext::DebugUtils,
     ext_surface: ash::extensions::khr::Surface,
-    ext_swapchain: ash::extensions::khr::Swapchain,
 
     pub gpu: Gpu,
     pub command_pool: vk::CommandPool,
@@ -85,13 +84,13 @@ impl Context {
                 .expect("Failed to wait device idle!")
         };
         self.apparatus.destroy(&self.gpu);
-        self.facade.destroy(&self.gpu, &self.ext_swapchain);
+        self.facade.destroy(&self.gpu);
         self.facade = Facade::new(
+            &self.instance,
             &self.window,
             self.surface,
             &self.gpu,
             &self.ext_surface,
-            &self.ext_swapchain,
         );
         let (shader_modules, _) =
             utils::get_shader_modules(&self.gpu).expect("Failed to load shader modules");
@@ -399,8 +398,6 @@ impl Context {
             }
         };
 
-        let ext_swapchain = ash::extensions::khr::Swapchain::new(&instance, &gpu.device);
-
         // # Load mesh
         // TODO: Benchmark and optimize
         let (vertices_data, indices_data) = {
@@ -466,7 +463,7 @@ impl Context {
         };
 
         // TODO: Move this up?
-        let facade = Facade::new(&window, surface, &gpu, &ext_surface, &ext_swapchain);
+        let facade = Facade::new(&instance, &window, surface, &gpu, &ext_surface);
 
         // # Uniform buffer descriptor layout
         let uniform_buffer_layout = {
@@ -604,7 +601,6 @@ impl Context {
             // - Extensions
             ext_debug_utils,
             ext_surface,
-            ext_swapchain,
             // - Device
             gpu,
             facade,
@@ -645,7 +641,7 @@ impl Context {
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
                 .expect("Failed to wait for Fence.");
 
-            let result = self.ext_swapchain.acquire_next_image(
+            let result = self.facade.ext_swapchain.acquire_next_image(
                 self.facade.swapchain,
                 std::u64::MAX,
                 self.facade.image_available_semaphores[self.current_frame],
@@ -713,7 +709,8 @@ impl Context {
         // Present the queue
         {
             let result = unsafe {
-                self.ext_swapchain
+                self.facade
+                    .ext_swapchain
                     .queue_present(self.gpu.present_queue, &present_info)
             };
 
@@ -824,7 +821,7 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            self.facade.destroy(&self.gpu, &self.ext_swapchain);
+            self.facade.destroy(&self.gpu);
             self.apparatus.destroy(&self.gpu);
 
             // Uniform buffer
