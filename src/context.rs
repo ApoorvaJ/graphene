@@ -93,7 +93,8 @@ impl Context {
             &self.ext_surface,
             &self.ext_swapchain,
         );
-        let shader_modules = utils::get_shader_modules(&self.gpu);
+        let (shader_modules, _) =
+            utils::get_shader_modules(&self.gpu).expect("Failed to load shader modules");
         self.apparatus = Apparatus::new(
             &self.gpu,
             &self.facade,
@@ -567,7 +568,8 @@ impl Context {
             descriptor_sets
         };
 
-        let shader_modules = utils::get_shader_modules(&gpu);
+        let (shader_modules, _) =
+            utils::get_shader_modules(&gpu).expect("Failed to load shader modules");
         let apparatus = Apparatus::new(
             &gpu,
             &facade,
@@ -736,20 +738,24 @@ impl Context {
                             .device_wait_idle()
                             .expect("Failed to wait device idle!");
                     }
-                    self.apparatus.destroy(&self.gpu);
-                    let shader_modules = utils::get_shader_modules(&self.gpu);
-                    // TODO: If shaders have compilation errors, don't recreating the apparatus
-                    self.apparatus = Apparatus::new(
-                        &self.gpu,
-                        &self.facade,
-                        self.command_pool,
-                        self.vertex_buffer,
-                        self.index_buffer,
-                        self.num_indices,
-                        self.uniform_buffer_layout,
-                        &self.descriptor_sets,
-                        shader_modules,
-                    );
+                    if let Some((shader_modules, num_changed)) =
+                        utils::get_shader_modules(&self.gpu)
+                    {
+                        if num_changed > 0 {
+                            self.apparatus.destroy(&self.gpu);
+                            self.apparatus = Apparatus::new(
+                                &self.gpu,
+                                &self.facade,
+                                self.command_pool,
+                                self.vertex_buffer,
+                                self.index_buffer,
+                                self.num_indices,
+                                self.uniform_buffer_layout,
+                                &self.descriptor_sets,
+                                shader_modules,
+                            );
+                        }
+                    }
                 }
                 _ => (),
             }
