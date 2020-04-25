@@ -12,7 +12,6 @@ pub struct Facade {
     pub _swapchain_images: Vec<vk::Image>,
     pub swapchain_imageviews: Vec<vk::ImageView>,
     pub depth_texture: Texture,
-    pub depth_image_view: vk::ImageView,
     // - Synchronization primitives. these aren't really resolution-dependent
     //   and could technically be moved outside the struct. They are kept here
     //   because they're closely related to the rest of the members.
@@ -21,32 +20,6 @@ pub struct Facade {
     pub command_buffer_complete_fences: Vec<vk::Fence>,
 
     pub ext_swapchain: ash::extensions::khr::Swapchain,
-}
-
-pub fn create_image_view(
-    gpu: &Gpu,
-    image: vk::Image,
-    format: vk::Format,
-    aspect_flags: vk::ImageAspectFlags,
-    mip_levels: u32,
-) -> vk::ImageView {
-    let imageview_create_info = vk::ImageViewCreateInfo::builder()
-        .view_type(vk::ImageViewType::TYPE_2D)
-        .format(format)
-        .subresource_range(vk::ImageSubresourceRange {
-            aspect_mask: aspect_flags,
-            base_mip_level: 0,
-            level_count: mip_levels,
-            base_array_layer: 0,
-            layer_count: 1,
-        })
-        .image(image);
-
-    unsafe {
-        gpu.device
-            .create_image_view(&imageview_create_info, None)
-            .expect("Failed to create Image View!")
-    }
 }
 
 impl Facade {
@@ -190,7 +163,7 @@ impl Facade {
         };
 
         // # Create depth buffer
-        let (depth_texture, depth_image_view) = {
+        let depth_texture = {
             let depth_format = vk::Format::D32_SFLOAT;
             let depth_texture = Texture::new(
                 &gpu,
@@ -198,16 +171,10 @@ impl Facade {
                 swapchain_extent.height,
                 depth_format,
                 vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            );
-            let depth_image_view = create_image_view(
-                &gpu,
-                depth_texture.image,
-                depth_format,
                 vk::ImageAspectFlags::DEPTH,
-                1,
             );
 
-            (depth_texture, depth_image_view)
+            depth_texture
         };
 
         // # Synchronization primitives
@@ -259,7 +226,6 @@ impl Facade {
             _swapchain_images: swapchain_images,
             swapchain_imageviews,
             depth_texture,
-            depth_image_view,
             image_available_semaphores,
             render_finished_semaphores,
             command_buffer_complete_fences,
@@ -281,7 +247,6 @@ impl Facade {
                 gpu.device.destroy_image_view(imageview, None);
             }
 
-            gpu.device.destroy_image_view(self.depth_image_view, None);
             self.depth_texture.destroy();
 
             self.ext_swapchain.destroy_swapchain(self.swapchain, None);

@@ -85,7 +85,7 @@ impl Apparatus {
                 .swapchain_imageviews
                 .iter()
                 .map(|&imageview| {
-                    let attachments = [imageview, facade.depth_image_view];
+                    let attachments = [imageview, facade.depth_texture.image_view];
 
                     let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
                         .render_pass(render_pass)
