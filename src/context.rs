@@ -63,6 +63,7 @@ pub struct Context {
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
     pub uniform_buffers: Vec<HostVisibleBuffer>,
     pub environment_texture: Texture,
+    pub environment_sampler: vk::Sampler,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
@@ -461,13 +462,22 @@ impl Context {
 
         // # Uniform buffer descriptor layout
         let uniform_buffer_layout = {
-            let bindings = [vk::DescriptorSetLayoutBinding {
-                binding: 0,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::VERTEX,
-                p_immutable_samplers: ptr::null(),
-            }];
+            let bindings = [
+                vk::DescriptorSetLayoutBinding {
+                    binding: 0,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: 1,
+                    stage_flags: vk::ShaderStageFlags::VERTEX,
+                    p_immutable_samplers: ptr::null(),
+                },
+                vk::DescriptorSetLayoutBinding {
+                    binding: 1,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1,
+                    stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                    p_immutable_samplers: ptr::null(),
+                },
+            ];
 
             let ubo_layout_create_info =
                 vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
@@ -490,12 +500,45 @@ impl Context {
             })
             .collect();
 
+        // # Environment texture
+        let environment_texture = Texture::new_from_image(
+            std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.hdr"),
+            &gpu,
+            command_pool,
+        );
+
+        // TODO: Spin this out into separate struct/function
+        let environment_sampler = {
+            let sampler_create_info = vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                .address_mode_v(vk::SamplerAddressMode::REPEAT)
+                .address_mode_w(vk::SamplerAddressMode::REPEAT)
+                .anisotropy_enable(true) // TODO: Disable this by default?
+                .max_anisotropy(16.0) //
+                .border_color(vk::BorderColor::INT_OPAQUE_BLACK);
+
+            unsafe {
+                gpu.device
+                    .create_sampler(&sampler_create_info, None)
+                    .expect("Failed to create Sampler!")
+            }
+        };
+
         // # Create descriptor pool
         let descriptor_pool = {
-            let pool_sizes = [vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: facade.num_frames as u32,
-            }];
+            let pool_sizes = [
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: facade.num_frames as u32,
+                },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: facade.num_frames as u32,
+                },
+            ];
 
             let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
                 .max_sets(facade.num_frames as u32)
@@ -510,6 +553,7 @@ impl Context {
 
         // # Create descriptor sets
         let descriptor_sets = {
+            // TODO: Convert to collect pattern
             let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
             for _ in 0..facade.num_frames {
                 layouts.push(uniform_buffer_layout);
@@ -525,22 +569,39 @@ impl Context {
                     .expect("Failed to allocate descriptor sets.")
             };
 
-            for (i, &descritptor_set) in descriptor_sets.iter().enumerate() {
+            for (i, &descriptor_set) in descriptor_sets.iter().enumerate() {
                 let descriptor_buffer_info = [vk::DescriptorBufferInfo {
                     buffer: uniform_buffers[i].vk_buffer,
                     offset: 0,
                     range: uniform_buffer_size as u64,
                 }];
 
-                let descriptor_write_sets = [vk::WriteDescriptorSet {
-                    dst_set: descritptor_set,
-                    dst_binding: 0,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    p_buffer_info: descriptor_buffer_info.as_ptr(),
-                    ..Default::default()
+                let descriptor_image_info = [vk::DescriptorImageInfo {
+                    sampler: environment_sampler,
+                    image_view: environment_texture.image_view,
+                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }];
+
+                let descriptor_write_sets = [
+                    vk::WriteDescriptorSet {
+                        dst_set: descriptor_set,
+                        dst_binding: 0,
+                        dst_array_element: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: descriptor_buffer_info.as_ptr(),
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_set: descriptor_set,
+                        dst_binding: 1,
+                        dst_array_element: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        p_image_info: descriptor_image_info.as_ptr(),
+                        ..Default::default()
+                    },
+                ];
 
                 unsafe {
                     gpu.device
@@ -577,12 +638,6 @@ impl Context {
             (watcher, rx)
         };
 
-        let environment_texture = Texture::new_from_image(
-            std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.hdr"),
-            &gpu,
-            command_pool,
-        );
-
         Context {
             window,
             event_loop: Some(event_loop),
@@ -606,6 +661,7 @@ impl Context {
             uniform_buffer_layout,
             uniform_buffers,
             environment_texture,
+            environment_sampler,
 
             debug_messenger,
             validation_layers,
@@ -830,6 +886,9 @@ impl Drop for Context {
             self.index_buffer.destroy();
             // Texture
             self.environment_texture.destroy();
+            self.gpu
+                .device
+                .destroy_sampler(self.environment_sampler, None);
 
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
