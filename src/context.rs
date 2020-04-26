@@ -479,21 +479,15 @@ impl Context {
         };
 
         // # Create the uniform buffer
-        let uniform_buffers = {
-            // TODO: Use iterator closures
-            let mut uniform_buffers = vec![];
-
-            for _ in 0..facade.num_frames {
-                let uniform_buffer = HostVisibleBuffer::new(
+        let uniform_buffers: Vec<HostVisibleBuffer> = (0..facade.num_frames)
+            .map(|_| {
+                HostVisibleBuffer::new(
                     uniform_buffer_size as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     &gpu,
-                );
-                uniform_buffers.push(uniform_buffer);
-            }
-
-            uniform_buffers
-        };
+                )
+            })
+            .collect();
 
         // # Create descriptor pool
         let descriptor_pool = {
