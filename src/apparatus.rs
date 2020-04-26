@@ -15,8 +15,8 @@ impl Apparatus {
         gpu: &Gpu,
         facade: &Facade,
         command_pool: vk::CommandPool,
-        vertex_buffer: vk::Buffer,
-        index_buffer: vk::Buffer,
+        vertex_buffer: &Buffer,
+        index_buffer: &Buffer,
         num_indices: u32,
         uniform_buffer_layout: vk::DescriptorSetLayout,
         descriptor_sets: &[vk::DescriptorSet],
@@ -328,7 +328,7 @@ impl Apparatus {
 
                 // Bind index and vertex buffers
                 {
-                    let vertex_buffers = [vertex_buffer];
+                    let vertex_buffers = [vertex_buffer.vk_buffer];
                     let offsets = [0_u64];
                     gpu.device.cmd_bind_vertex_buffers(
                         command_buffer,
@@ -338,7 +338,7 @@ impl Apparatus {
                     );
                     gpu.device.cmd_bind_index_buffer(
                         command_buffer,
-                        index_buffer,
+                        index_buffer.vk_buffer,
                         0,
                         vk::IndexType::UINT32,
                     );

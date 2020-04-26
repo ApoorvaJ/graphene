@@ -53,16 +53,13 @@ pub struct Context {
 
     pub gpu: Gpu,
     pub command_pool: vk::CommandPool,
-    pub vertex_buffer: vk::Buffer,
-    pub vertex_buffer_memory: vk::DeviceMemory,
-    pub index_buffer: vk::Buffer,
-    pub index_buffer_memory: vk::DeviceMemory,
+    pub vertex_buffer: Buffer,
+    pub index_buffer: Buffer,
     pub num_indices: u32,
     pub descriptor_pool: vk::DescriptorPool,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
-    pub uniform_buffers: Vec<vk::Buffer>,
-    pub uniform_buffers_memory: Vec<vk::DeviceMemory>,
+    pub uniform_buffers: Vec<Buffer>,
     pub facade: Facade, // Resolution-dependent apparatus
     pub apparatus: Apparatus,
 
@@ -98,8 +95,8 @@ impl Context {
             &self.gpu,
             &self.facade,
             self.command_pool,
-            self.vertex_buffer,
-            self.index_buffer,
+            &self.vertex_buffer,
+            &self.index_buffer,
             self.num_indices,
             self.uniform_buffer_layout,
             &self.descriptor_sets,
@@ -443,24 +440,20 @@ impl Context {
         };
 
         // # Create and upload the vertex buffer
-        let (vertex_buffer, vertex_buffer_memory) = {
-            new_buffer(
-                &vertices_data,
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                &gpu,
-                command_pool,
-            )
-        };
+        let vertex_buffer = new_buffer(
+            &vertices_data,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            &gpu,
+            command_pool,
+        );
 
         // # Create and upload index buffer
-        let (index_buffer, index_buffer_memory) = {
-            new_buffer(
-                &indices_data,
-                vk::BufferUsageFlags::INDEX_BUFFER,
-                &gpu,
-                command_pool,
-            )
-        };
+        let index_buffer = new_buffer(
+            &indices_data,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            &gpu,
+            command_pool,
+        );
 
         // TODO: Move this up?
         let facade = Facade::new(&instance, &window, surface, &gpu, &ext_surface);
@@ -486,22 +479,21 @@ impl Context {
         };
 
         // # Create the uniform buffer
-        let (uniform_buffers, uniform_buffers_memory) = {
+        let uniform_buffers = {
+            // TODO: Use iterator closures
             let mut uniform_buffers = vec![];
-            let mut uniform_buffers_memory = vec![];
 
             for _ in 0..facade.num_frames {
-                let (uniform_buffer, uniform_buffer_memory) = create_buffer(
+                let uniform_buffer = Buffer::new(
                     &gpu,
                     uniform_buffer_size as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                 );
                 uniform_buffers.push(uniform_buffer);
-                uniform_buffers_memory.push(uniform_buffer_memory);
             }
 
-            (uniform_buffers, uniform_buffers_memory)
+            uniform_buffers
         };
 
         // # Create descriptor pool
@@ -541,7 +533,7 @@ impl Context {
 
             for (i, &descritptor_set) in descriptor_sets.iter().enumerate() {
                 let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-                    buffer: uniform_buffers[i],
+                    buffer: uniform_buffers[i].vk_buffer,
                     offset: 0,
                     range: uniform_buffer_size as u64,
                 }];
@@ -571,8 +563,8 @@ impl Context {
             &gpu,
             &facade,
             command_pool,
-            vertex_buffer,
-            index_buffer,
+            &vertex_buffer,
+            &index_buffer,
             indices_data.len() as u32,
             uniform_buffer_layout,
             &descriptor_sets,
@@ -606,15 +598,12 @@ impl Context {
             facade,
             command_pool,
             vertex_buffer,
-            vertex_buffer_memory,
             index_buffer,
-            index_buffer_memory,
             num_indices: indices_data.len() as u32,
             descriptor_pool,
             descriptor_sets,
             uniform_buffer_layout,
             uniform_buffers,
-            uniform_buffers_memory,
             // - Resolution-dependent apparatus
             apparatus,
 
@@ -744,8 +733,8 @@ impl Context {
                                 &self.gpu,
                                 &self.facade,
                                 self.command_pool,
-                                self.vertex_buffer,
-                                self.index_buffer,
+                                &self.vertex_buffer,
+                                &self.index_buffer,
                                 self.num_indices,
                                 self.uniform_buffer_layout,
                                 &self.descriptor_sets,
@@ -832,20 +821,13 @@ impl Drop for Context {
                 .device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
 
-            for i in 0..self.uniform_buffers.len() {
-                self.gpu
-                    .device
-                    .destroy_buffer(self.uniform_buffers[i], None);
-                self.gpu
-                    .device
-                    .free_memory(self.uniform_buffers_memory[i], None);
+            for buffer in self.uniform_buffers.iter() {
+                buffer.destroy();
             }
             // Vertex buffer
-            self.gpu.device.destroy_buffer(self.vertex_buffer, None);
-            self.gpu.device.free_memory(self.vertex_buffer_memory, None);
+            self.vertex_buffer.destroy();
             // Index buffer
-            self.gpu.device.destroy_buffer(self.index_buffer, None);
-            self.gpu.device.free_memory(self.index_buffer_memory, None);
+            self.index_buffer.destroy();
 
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
