@@ -31,26 +31,9 @@ impl DeviceLocalBuffer {
 
         // ## Copy staging buffer -> vertex buffer
         {
-            let allocate_info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(1);
-
-            let command_buffers = unsafe {
-                gpu.device
-                    .allocate_command_buffers(&allocate_info)
-                    .expect("Failed to allocate command buffer.")
-            };
-            let command_buffer = command_buffers[0];
-
-            let begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+            let command_buffer = begin_single_time_command_buffer(&gpu.device, command_pool);
 
             unsafe {
-                gpu.device
-                    .begin_command_buffer(command_buffer, &begin_info)
-                    .expect("Failed to begin command buffer.");
-
                 let copy_regions = [vk::BufferCopy {
                     src_offset: 0,
                     dst_offset: 0,
@@ -63,29 +46,9 @@ impl DeviceLocalBuffer {
                     vk_buffer,
                     &copy_regions,
                 );
-
-                gpu.device
-                    .end_command_buffer(command_buffer)
-                    .expect("Failed to end command buffer");
             }
 
-            let submit_info = [vk::SubmitInfo {
-                command_buffer_count: command_buffers.len() as u32,
-                p_command_buffers: command_buffers.as_ptr(),
-                ..Default::default()
-            }];
-
-            unsafe {
-                gpu.device
-                    .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
-                    .expect("Failed to Submit Queue.");
-                gpu.device
-                    .queue_wait_idle(gpu.graphics_queue)
-                    .expect("Failed to wait Queue idle");
-
-                gpu.device
-                    .free_command_buffers(command_pool, &command_buffers);
-            }
+            end_single_time_command_buffer(command_buffer, command_pool, &gpu);
         }
 
         staging_buffer.destroy();

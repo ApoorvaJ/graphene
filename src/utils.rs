@@ -1,5 +1,11 @@
 use crate::*;
 
+/*
+    1. Section_1: Shaders
+    2. Section_2: Command buffers
+*/
+
+/* 1. Section_1: Shaders */
 // This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`
 // member expects a *u32, but `include_bytes!()` produces a Vec<u8>.
 // TODO: Investigate how to properly address this.
@@ -98,4 +104,64 @@ pub fn get_shader_modules(gpu: &Gpu) -> Option<(Vec<vk::ShaderModule>, usize)> {
         .collect();
 
     Some((modules, glsl_files_to_compile.len()))
+}
+
+/* 2. Section_2: Command buffers */
+
+pub fn begin_single_time_command_buffer(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+) -> vk::CommandBuffer {
+    let allocate_info = vk::CommandBufferAllocateInfo::builder()
+        .command_pool(command_pool)
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_buffer_count(1);
+
+    let command_buffer = unsafe {
+        device
+            .allocate_command_buffers(&allocate_info)
+            .expect("Failed to allocate Command Buffers!")
+    }[0];
+
+    let begin_info =
+        vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+    unsafe {
+        device
+            .begin_command_buffer(command_buffer, &begin_info)
+            .expect("Failed to begin recording Command Buffer at beginning!");
+    }
+
+    command_buffer
+}
+
+pub fn end_single_time_command_buffer(
+    command_buffer: vk::CommandBuffer,
+    command_pool: vk::CommandPool,
+    gpu: &Gpu,
+) {
+    unsafe {
+        gpu.device
+            .end_command_buffer(command_buffer)
+            .expect("Failed to record end-command-buffer");
+    }
+
+    let command_buffers = [command_buffer];
+
+    let submit_info = [vk::SubmitInfo {
+        command_buffer_count: command_buffers.len() as u32,
+        p_command_buffers: command_buffers.as_ptr(),
+        ..Default::default()
+    }];
+
+    unsafe {
+        gpu.device
+            .queue_submit(gpu.graphics_queue, &submit_info, vk::Fence::null())
+            .expect("Failed to Queue Submit!");
+        gpu.device
+            .queue_wait_idle(gpu.graphics_queue)
+            .expect("Failed to wait Queue idle!");
+        gpu.device
+            .free_command_buffers(command_pool, &command_buffers);
+    }
 }
