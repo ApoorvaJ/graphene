@@ -36,7 +36,7 @@ fn main() {
                 .gpu
                 .device
                 .map_memory(
-                    ctx.uniform_buffers[frame_idx].device_memory,
+                    ctx.uniform_buffers[frame_idx].memory,
                     0,
                     buffer_size,
                     vk::MemoryMapFlags::empty(),
@@ -47,7 +47,7 @@ fn main() {
 
             ctx.gpu
                 .device
-                .unmap_memory(ctx.uniform_buffers[frame_idx].device_memory);
+                .unmap_memory(ctx.uniform_buffers[frame_idx].memory);
         }
     });
 }

@@ -53,13 +53,13 @@ pub struct Context {
 
     pub gpu: Gpu,
     pub command_pool: vk::CommandPool,
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
+    pub vertex_buffer: DeviceLocalBuffer,
+    pub index_buffer: DeviceLocalBuffer,
     pub num_indices: u32,
     pub descriptor_pool: vk::DescriptorPool,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
-    pub uniform_buffers: Vec<Buffer>,
+    pub uniform_buffers: Vec<HostVisibleBuffer>,
     pub facade: Facade, // Resolution-dependent apparatus
     pub apparatus: Apparatus,
 
@@ -440,7 +440,7 @@ impl Context {
         };
 
         // # Create and upload the vertex buffer
-        let vertex_buffer = new_buffer(
+        let vertex_buffer = DeviceLocalBuffer::new(
             &vertices_data,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             &gpu,
@@ -448,7 +448,7 @@ impl Context {
         );
 
         // # Create and upload index buffer
-        let index_buffer = new_buffer(
+        let index_buffer = DeviceLocalBuffer::new(
             &indices_data,
             vk::BufferUsageFlags::INDEX_BUFFER,
             &gpu,
@@ -484,11 +484,10 @@ impl Context {
             let mut uniform_buffers = vec![];
 
             for _ in 0..facade.num_frames {
-                let uniform_buffer = Buffer::new(
-                    &gpu,
+                let uniform_buffer = HostVisibleBuffer::new(
                     uniform_buffer_size as u64,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                    &gpu,
                 );
                 uniform_buffers.push(uniform_buffer);
             }
