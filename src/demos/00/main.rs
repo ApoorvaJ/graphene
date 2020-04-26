@@ -1,5 +1,3 @@
-use ash::version::DeviceV1_0;
-use ash::vk;
 use glam::*;
 use std::f32::consts::PI;
 
@@ -29,25 +27,6 @@ fn main() {
                 * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS),
         }];
 
-        let buffer_size = (std::mem::size_of::<UniformBuffer>() * ubos.len()) as u64;
-
-        unsafe {
-            let data_ptr = ctx
-                .gpu
-                .device
-                .map_memory(
-                    ctx.uniform_buffers[frame_idx].memory,
-                    0,
-                    buffer_size,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .expect("Failed to map memory.") as *mut UniformBuffer;
-
-            data_ptr.copy_from_nonoverlapping(ubos.as_ptr(), ubos.len());
-
-            ctx.gpu
-                .device
-                .unmap_memory(ctx.uniform_buffers[frame_idx].memory);
-        }
+        ctx.uniform_buffers[frame_idx].upload_data(&ubos, 0, &ctx.gpu);
     });
 }

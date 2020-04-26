@@ -19,15 +19,8 @@ impl DeviceLocalBuffer {
         let staging_buffer = HostVisibleBuffer::new(size, vk::BufferUsageFlags::TRANSFER_SRC, &gpu);
 
         // ## Copy data to staging buffer
-        unsafe {
-            let data_ptr = gpu
-                .device
-                .map_memory(staging_buffer.memory, 0, size, vk::MemoryMapFlags::empty())
-                .expect("Failed to map memory.") as *mut T;
+        staging_buffer.upload_data(data, 0, gpu);
 
-            data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
-            gpu.device.unmap_memory(staging_buffer.memory);
-        }
         // ## Create buffer in device-local memory
         let (vk_buffer, memory) = super::new_raw_buffer(
             size,
