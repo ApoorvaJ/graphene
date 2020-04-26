@@ -404,7 +404,7 @@ impl Context {
             let mut indices_data: Vec<u32> = Vec::new();
 
             let (gltf, buffers, _) =
-                gltf::import("assets/suzanne.glb").expect("Failed to open mesh.");
+                gltf::import("assets/meshes/sphere.glb").expect("Failed to open mesh.");
             for mesh in gltf.meshes() {
                 for primitive in mesh.primitives() {
                     let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));

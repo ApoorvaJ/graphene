@@ -9,7 +9,11 @@ layout(location = 0) in vec3 fragNormal;
 
 layout(location = 0) out vec4 outColor;
 
+const float PI = 3.14159265358979323846264338327950288;
+
 void main() {
-    // outColor = vec4(fragNormal, 1.0);
-    outColor = texture(texSampler, fragNormal.xy * 0.5 + 0.5);
+    vec3 r = fragNormal;
+    float u = (atan(r.x/r.z) + PI) / (3.0 * PI);
+    float v = (asin(r.y) + 0.5 * PI) / PI;
+    outColor = texture(texSampler, vec2(u, v));
 }
