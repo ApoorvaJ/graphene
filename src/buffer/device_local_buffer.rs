@@ -31,7 +31,7 @@ impl DeviceLocalBuffer {
 
         // ## Copy staging buffer -> vertex buffer
         {
-            let command_buffer = begin_single_time_command_buffer(&gpu.device, command_pool);
+            let command_buffer = begin_single_use_command_buffer(&gpu.device, command_pool);
 
             unsafe {
                 let copy_regions = [vk::BufferCopy {
@@ -48,7 +48,7 @@ impl DeviceLocalBuffer {
                 );
             }
 
-            end_single_time_command_buffer(command_buffer, command_pool, &gpu);
+            end_single_use_command_buffer(command_buffer, command_pool, &gpu);
         }
 
         staging_buffer.destroy();

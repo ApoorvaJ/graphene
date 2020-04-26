@@ -108,7 +108,7 @@ pub fn get_shader_modules(gpu: &Gpu) -> Option<(Vec<vk::ShaderModule>, usize)> {
 
 /* 2. Section_2: Command buffers */
 
-pub fn begin_single_time_command_buffer(
+pub fn begin_single_use_command_buffer(
     device: &ash::Device,
     command_pool: vk::CommandPool,
 ) -> vk::CommandBuffer {
@@ -135,7 +135,7 @@ pub fn begin_single_time_command_buffer(
     command_buffer
 }
 
-pub fn end_single_time_command_buffer(
+pub fn end_single_use_command_buffer(
     command_buffer: vk::CommandBuffer,
     command_pool: vk::CommandPool,
     gpu: &Gpu,

@@ -104,4 +104,157 @@ impl Texture {
             self.device.free_memory(self.device_memory, None);
         }
     }
+
+    fn transition_image_layout(
+        &self,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        command_pool: vk::CommandPool,
+        gpu: &Gpu,
+    ) {
+        // TODO: Hoist this out
+        let command_buffer = begin_single_use_command_buffer(&gpu.device, command_pool);
+
+        let src_access_mask;
+        let dst_access_mask;
+        let source_stage;
+        let destination_stage;
+
+        if old_layout == vk::ImageLayout::UNDEFINED
+            && new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+        {
+            src_access_mask = vk::AccessFlags::empty();
+            dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+            destination_stage = vk::PipelineStageFlags::TRANSFER;
+        } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        {
+            src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            dst_access_mask = vk::AccessFlags::SHADER_READ;
+            source_stage = vk::PipelineStageFlags::TRANSFER;
+            destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
+        } else {
+            panic!("Unsupported layout transition!")
+        }
+
+        let image_barriers = [vk::ImageMemoryBarrier {
+            s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
+            p_next: ptr::null(),
+            src_access_mask,
+            dst_access_mask,
+            old_layout,
+            new_layout,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image: self.image,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        }];
+
+        unsafe {
+            gpu.device.cmd_pipeline_barrier(
+                command_buffer,
+                source_stage,
+                destination_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &image_barriers,
+            );
+        }
+
+        // TODO: Hoist this out
+        end_single_use_command_buffer(command_buffer, command_pool, gpu);
+    }
+
+    pub fn new_from_image(
+        path: &std::path::Path,
+        gpu: &Gpu,
+        command_pool: vk::CommandPool,
+    ) -> Texture {
+        use image::GenericImageView;
+        let mut image_object = image::open(path).unwrap();
+        image_object = image_object.flipv();
+
+        let (image_width, image_height) = (image_object.width(), image_object.height());
+        let image_size =
+            (std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
+        let image_data = image_object.to_rgba().into_raw();
+
+        if image_size <= 0 {
+            panic!("Failed to load texture image!")
+        }
+
+        let texture = Texture::new(
+            gpu,
+            image_width,
+            image_height,
+            vk::Format::R8G8B8A8_UNORM, // TODO: Derive format from file or take as an argument
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageAspectFlags::COLOR,
+        );
+
+        let staging_buffer =
+            HostVisibleBuffer::new(image_size, vk::BufferUsageFlags::TRANSFER_SRC, gpu);
+        staging_buffer.upload_data(&image_data, 0, gpu);
+
+        texture.transition_image_layout(
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            command_pool,
+            gpu,
+        );
+
+        // Copy buffer to image
+        {
+            let command_buffer = begin_single_use_command_buffer(&gpu.device, command_pool);
+
+            let buffer_image_regions = [vk::BufferImageCopy {
+                image_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+                image_extent: vk::Extent3D {
+                    width: image_width,
+                    height: image_height,
+                    depth: 1,
+                },
+                buffer_offset: 0,
+                buffer_image_height: 0,
+                buffer_row_length: 0,
+                image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+            }];
+
+            unsafe {
+                gpu.device.cmd_copy_buffer_to_image(
+                    command_buffer,
+                    staging_buffer.vk_buffer,
+                    texture.image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &buffer_image_regions,
+                );
+            }
+
+            end_single_use_command_buffer(command_buffer, command_pool, &gpu);
+        }
+
+        texture.transition_image_layout(
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            command_pool,
+            gpu,
+        );
+
+        staging_buffer.destroy();
+
+        texture
+    }
 }

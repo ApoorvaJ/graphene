@@ -52,6 +52,8 @@ pub struct Context {
     ext_surface: ash::extensions::khr::Surface,
 
     pub gpu: Gpu,
+    pub facade: Facade, // Resolution-dependent apparatus
+    pub apparatus: Apparatus,
     pub command_pool: vk::CommandPool,
     pub vertex_buffer: DeviceLocalBuffer,
     pub index_buffer: DeviceLocalBuffer,
@@ -60,8 +62,7 @@ pub struct Context {
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
     pub uniform_buffers: Vec<HostVisibleBuffer>,
-    pub facade: Facade, // Resolution-dependent apparatus
-    pub apparatus: Apparatus,
+    pub environment_texture: Texture,
 
     debug_messenger: vk::DebugUtilsMessengerEXT,
     validation_layers: Vec<String>,
@@ -576,6 +577,12 @@ impl Context {
             (watcher, rx)
         };
 
+        let environment_texture = Texture::new_from_image(
+            std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.hdr"),
+            &gpu,
+            command_pool,
+        );
+
         Context {
             window,
             event_loop: Some(event_loop),
@@ -589,6 +596,7 @@ impl Context {
             // - Device
             gpu,
             facade,
+            apparatus,
             command_pool,
             vertex_buffer,
             index_buffer,
@@ -597,8 +605,7 @@ impl Context {
             descriptor_sets,
             uniform_buffer_layout,
             uniform_buffers,
-            // - Resolution-dependent apparatus
-            apparatus,
+            environment_texture,
 
             debug_messenger,
             validation_layers,
@@ -821,6 +828,8 @@ impl Drop for Context {
             self.vertex_buffer.destroy();
             // Index buffer
             self.index_buffer.destroy();
+            // Texture
+            self.environment_texture.destroy();
 
             self.gpu.device.destroy_device(None);
             self.ext_surface.destroy_surface(self.surface, None);
