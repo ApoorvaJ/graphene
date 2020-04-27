@@ -404,7 +404,7 @@ impl Context {
             let mut indices_data: Vec<u32> = Vec::new();
 
             let (gltf, buffers, _) =
-                gltf::import("assets/meshes/sphere.glb").expect("Failed to open mesh.");
+                gltf::import("assets/meshes/suzanne.glb").expect("Failed to open mesh.");
             for mesh in gltf.meshes() {
                 for primitive in mesh.primitives() {
                     let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -467,7 +467,7 @@ impl Context {
                     binding: 0,
                     descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
                     descriptor_count: 1,
-                    stage_flags: vk::ShaderStageFlags::VERTEX,
+                    stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                     p_immutable_samplers: ptr::null(),
                 },
                 vk::DescriptorSetLayoutBinding {
@@ -502,7 +502,7 @@ impl Context {
 
         // # Environment texture
         let environment_texture = Texture::new_from_image(
-            std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.hdr"),
+            std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.jpg"),
             &gpu,
             command_pool,
         );

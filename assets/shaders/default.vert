@@ -4,7 +4,8 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(set = 0, binding = 0) uniform UniformBuffer {
-    mat4 mtx_world_to_clip;
+    mat4 mtx_model_to_clip;
+    mat4 mtx_model_to_view_norm;
 } ubo;
 
 layout(location = 0) in vec3 inPosition;
@@ -18,6 +19,6 @@ out gl_PerVertex {
 
 void main() {
 
-    gl_Position = ubo.mtx_world_to_clip * vec4(inPosition, 1.0);
+    gl_Position = ubo.mtx_model_to_clip * vec4(inPosition, 1.0);
     fragColor = inNormal;
 }
