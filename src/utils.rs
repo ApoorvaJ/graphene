@@ -77,12 +77,15 @@ pub fn get_shader_modules(gpu: &Gpu) -> Option<(Vec<vk::ShaderModule>, usize)> {
             .output()
             .expect("`glslc`, the GLSL -> SPIR-V compiler, could not be invoked.");
         if !glslc_output.status.success() {
-            println!(
-                "{}:\n    {}",
-                file,
-                String::from_utf8(glslc_output.stderr).unwrap()
-            );
+            println!("{}:", file,);
+            // Print error message with indentation
+            let err = String::from_utf8(glslc_output.stderr).unwrap();
+            for err_line in err.lines() {
+                println!("    {}", err_line);
+            }
             all_compilations_successful = false;
+        } else {
+            println!("{}: OK.", file);
         }
     }
 
