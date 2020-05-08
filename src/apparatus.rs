@@ -1,6 +1,8 @@
 use crate::*;
 
 pub struct Apparatus {
+    device: ash::Device,
+
     pub render_pass: vk::RenderPass,
     pub framebuffers: Vec<vk::Framebuffer>,
     // - Pipelines
@@ -8,6 +10,20 @@ pub struct Apparatus {
     pub graphics_pipeline: vk::Pipeline,
     // - Commands
     pub command_buffers: Vec<vk::CommandBuffer>,
+}
+
+impl Drop for Apparatus {
+    fn drop(&mut self) {
+        unsafe {
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_pipeline(self.graphics_pipeline, None);
+            for &framebuffer in self.framebuffers.iter() {
+                self.device.destroy_framebuffer(framebuffer, None);
+            }
+            self.device.destroy_render_pass(self.render_pass, None);
+        }
+    }
 }
 
 impl Apparatus {
@@ -369,23 +385,12 @@ impl Apparatus {
         }
 
         Apparatus {
+            device: gpu.device.clone(),
             render_pass,
             framebuffers,
             graphics_pipeline,
             pipeline_layout,
             command_buffers,
-        }
-    }
-
-    pub fn destroy(&self, gpu: &Gpu) {
-        unsafe {
-            gpu.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-            gpu.device.destroy_pipeline(self.graphics_pipeline, None);
-            for &framebuffer in self.framebuffers.iter() {
-                gpu.device.destroy_framebuffer(framebuffer, None);
-            }
-            gpu.device.destroy_render_pass(self.render_pass, None);
         }
     }
 }
