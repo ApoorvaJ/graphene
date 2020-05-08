@@ -10,8 +10,6 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
 
-    pub gpu: Gpu,
-    pub facade: Facade, // Resolution-dependent apparatus
     pub apparatus: Apparatus,
     pub command_pool: vk::CommandPool,
     pub vertex_buffer: DeviceLocalBuffer,
@@ -30,7 +28,9 @@ pub struct Context {
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 
-    basis: Basis,
+    pub facade: Facade, // Resolution-dependent apparatus
+    pub gpu: Gpu,
+    pub basis: Basis,
 }
 
 impl Context {
@@ -42,7 +42,6 @@ impl Context {
                 .expect("Failed to wait device idle!")
         };
         self.apparatus.destroy(&self.gpu);
-        self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
         let (shader_modules, _) =
             utils::get_shader_modules(&self.gpu).expect("Failed to load shader modules");
@@ -549,7 +548,6 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            self.facade.destroy(&self.gpu);
             self.apparatus.destroy(&self.gpu);
 
             // Uniform buffer

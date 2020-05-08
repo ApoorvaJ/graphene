@@ -1,6 +1,8 @@
 use crate::*;
 
 pub struct Facade {
+    device: ash::Device,
+
     // Surface info. Changes with resolution.
     pub surface_caps: vk::SurfaceCapabilitiesKHR,
     pub surface_formats: Vec<vk::SurfaceFormatKHR>,
@@ -20,6 +22,28 @@ pub struct Facade {
     pub command_buffer_complete_fences: Vec<vk::Fence>,
 
     pub ext_swapchain: ash::extensions::khr::Swapchain,
+}
+
+impl Drop for Facade {
+    fn drop(&mut self) {
+        unsafe {
+            for i in 0..self.num_frames {
+                self.device
+                    .destroy_semaphore(self.image_available_semaphores[i], None);
+                self.device
+                    .destroy_semaphore(self.render_finished_semaphores[i], None);
+                self.device
+                    .destroy_fence(self.command_buffer_complete_fences[i], None);
+            }
+            for &imageview in self.swapchain_imageviews.iter() {
+                self.device.destroy_image_view(imageview, None);
+            }
+
+            self.depth_texture.destroy();
+
+            self.ext_swapchain.destroy_swapchain(self.swapchain, None);
+        }
+    }
 }
 
 impl Facade {
@@ -213,6 +237,7 @@ impl Facade {
         };
 
         Facade {
+            device: gpu.device.clone(),
             surface_caps,
             surface_formats,
             num_frames: num_frames as usize,
@@ -226,26 +251,6 @@ impl Facade {
             render_finished_semaphores,
             command_buffer_complete_fences,
             ext_swapchain,
-        }
-    }
-
-    pub fn destroy(&self, gpu: &Gpu) {
-        unsafe {
-            for i in 0..self.num_frames {
-                gpu.device
-                    .destroy_semaphore(self.image_available_semaphores[i], None);
-                gpu.device
-                    .destroy_semaphore(self.render_finished_semaphores[i], None);
-                gpu.device
-                    .destroy_fence(self.command_buffer_complete_fences[i], None);
-            }
-            for &imageview in self.swapchain_imageviews.iter() {
-                gpu.device.destroy_image_view(imageview, None);
-            }
-
-            self.depth_texture.destroy();
-
-            self.ext_swapchain.destroy_swapchain(self.swapchain, None);
         }
     }
 }
