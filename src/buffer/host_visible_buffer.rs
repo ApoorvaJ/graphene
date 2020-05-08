@@ -7,6 +7,15 @@ pub struct HostVisibleBuffer {
     device: ash::Device,
 }
 
+impl Drop for HostVisibleBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_buffer(self.vk_buffer, None);
+            self.device.free_memory(self.memory, None);
+        }
+    }
+}
+
 impl HostVisibleBuffer {
     pub fn new(size: u64, usage: vk::BufferUsageFlags, gpu: &Gpu) -> HostVisibleBuffer {
         let (vk_buffer, memory) = super::new_raw_buffer(
@@ -21,13 +30,6 @@ impl HostVisibleBuffer {
             memory,
             size,
             device: gpu.device.clone(),
-        }
-    }
-
-    pub fn destroy(&self) {
-        unsafe {
-            self.device.destroy_buffer(self.vk_buffer, None);
-            self.device.free_memory(self.memory, None);
         }
     }
 

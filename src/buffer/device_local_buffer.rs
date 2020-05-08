@@ -51,8 +51,6 @@ impl DeviceLocalBuffer {
             end_single_use_command_buffer(command_buffer, command_pool, &gpu);
         }
 
-        staging_buffer.destroy();
-
         DeviceLocalBuffer {
             vk_buffer,
             memory,

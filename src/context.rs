@@ -554,9 +554,6 @@ impl Drop for Context {
                 .device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
 
-            for buffer in self.uniform_buffers.iter() {
-                buffer.destroy();
-            }
             // Vertex buffer
             self.vertex_buffer.destroy();
             // Index buffer

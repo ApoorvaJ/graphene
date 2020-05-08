@@ -253,8 +253,6 @@ impl Texture {
             gpu,
         );
 
-        staging_buffer.destroy();
-
         texture
     }
 }
