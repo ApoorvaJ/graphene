@@ -11,6 +11,8 @@ pub use context::*;
 pub use context::*;
 pub mod facade;
 pub use facade::*;
+pub mod gpu;
+pub use gpu::*;
 pub mod texture;
 pub use texture::*;
 pub mod utils;
