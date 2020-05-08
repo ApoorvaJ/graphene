@@ -1,29 +1,11 @@
 use crate::*;
 
-use ash::version::DeviceV1_0;
-use ash::version::EntryV1_0;
-use ash::version::InstanceV1_0;
-use ash::vk;
-use ash::vk_make_version;
 use glam::*;
-use std::ffi::CString;
 use std::os::raw::c_char;
 use std::os::raw::c_void;
 use std::ptr;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-
-fn vk_to_string(raw_string_array: &[c_char]) -> String {
-    let raw_string = unsafe {
-        let pointer = raw_string_array.as_ptr();
-        CStr::from_ptr(pointer)
-    };
-
-    raw_string
-        .to_str()
-        .expect("Failed to convert vulkan raw string.")
-        .to_owned()
-}
 
 pub struct Gpu {
     // Physical device
@@ -44,13 +26,6 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
 
-    _entry: ash::Entry,
-    instance: ash::Instance,
-    surface: vk::SurfaceKHR,
-    // - Extensions
-    ext_debug_utils: ash::extensions::ext::DebugUtils,
-    ext_surface: ash::extensions::khr::Surface,
-
     pub gpu: Gpu,
     pub facade: Facade, // Resolution-dependent apparatus
     pub apparatus: Apparatus,
@@ -65,13 +40,13 @@ pub struct Context {
     pub environment_texture: Texture,
     pub environment_sampler: vk::Sampler,
 
-    debug_messenger: vk::DebugUtilsMessengerEXT,
-    validation_layers: Vec<String>,
     pub current_frame: usize,
     start_instant: std::time::Instant,
 
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
+
+    basis: Basis,
 }
 
 impl Context {
@@ -84,13 +59,7 @@ impl Context {
         };
         self.apparatus.destroy(&self.gpu);
         self.facade.destroy(&self.gpu);
-        self.facade = Facade::new(
-            &self.instance,
-            &self.window,
-            self.surface,
-            &self.gpu,
-            &self.ext_surface,
-        );
+        self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
         let (shader_modules, _) =
             utils::get_shader_modules(&self.gpu).expect("Failed to load shader modules");
         self.apparatus = Apparatus::new(
@@ -108,8 +77,6 @@ impl Context {
 
     pub fn new(uniform_buffer_size: usize) -> Context {
         const APP_NAME: &str = "";
-        const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
-        let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
         let device_extensions = vec![String::from("VK_KHR_swapchain")];
 
         // # Init window
@@ -122,88 +89,7 @@ impl Context {
                 .expect("Failed to create window.")
         };
 
-        // # Init Ash
-        let entry = ash::Entry::new().unwrap();
-
-        // # Create Vulkan instance
-        let instance = {
-            let app_name = CString::new(APP_NAME).unwrap();
-            let engine_name = CString::new("grapheme").unwrap();
-            let app_info = vk::ApplicationInfo::builder()
-                .application_name(&app_name)
-                .application_version(vk_make_version!(1, 0, 0))
-                .engine_name(&engine_name)
-                .engine_version(vk_make_version!(1, 0, 0))
-                .api_version(vk_make_version!(1, 0, 92));
-
-            // Ensure that all desired validation layers are available
-            if !validation_layers.is_empty() {
-                // Enumerate available validation layers
-                let layer_props = entry
-                    .enumerate_instance_layer_properties()
-                    .expect("Failed to enumerate instance layers properties.");
-                // Iterate over all desired layers
-                for layer in validation_layers.iter() {
-                    let is_layer_found = layer_props
-                        .iter()
-                        .any(|&prop| vk_to_string(&prop.layer_name) == *layer);
-                    if !is_layer_found {
-                        panic!(
-                            "Validation layer '{}' requested, but not found. \
-                               (1) Install the Vulkan SDK and set up validation layers, \
-                               or (2) remove any validation layers in the Rust code.",
-                            layer
-                        );
-                    }
-                }
-            }
-
-            let required_validation_layer_raw_names: Vec<CString> = validation_layers
-                .iter()
-                .map(|layer_name| CString::new(layer_name.to_string()).unwrap())
-                .collect();
-            let layer_names: Vec<*const c_char> = required_validation_layer_raw_names
-                .iter()
-                .map(|layer_name| layer_name.as_ptr())
-                .collect();
-
-            let extension_names = platforms::required_extension_names();
-
-            let create_info = vk::InstanceCreateInfo::builder()
-                .enabled_layer_names(&layer_names)
-                .application_info(&app_info)
-                .enabled_extension_names(&extension_names);
-
-            let instance: ash::Instance = unsafe {
-                entry
-                    .create_instance(&create_info, None)
-                    .expect("Failed to create instance.")
-            };
-
-            instance
-        };
-
-        // # Debug messenger callback
-        let ext_debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-        let debug_messenger = {
-            if !ENABLE_DEBUG_MESSENGER_CALLBACK {
-                ash::vk::DebugUtilsMessengerEXT::null()
-            } else {
-                let messenger_ci = populate_debug_messenger_create_info();
-                unsafe {
-                    ext_debug_utils
-                        .create_debug_utils_messenger(&messenger_ci, None)
-                        .expect("Debug Utils Callback")
-                }
-            }
-        };
-
-        // # Create surface
-        let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
-        let surface = unsafe {
-            platforms::create_surface(&entry, &instance, &window)
-                .expect("Failed to create surface.")
-        };
+        let basis = Basis::new(APP_NAME, &window);
 
         // # Enumerate eligible GPUs
         struct CandidateGpu {
@@ -217,7 +103,8 @@ impl Context {
         }
         let candidate_gpus: Vec<CandidateGpu> = {
             let physical_devices = unsafe {
-                &instance
+                &basis
+                    .instance
                     .enumerate_physical_devices()
                     .expect("Failed to enumerate Physical Devices!")
             };
@@ -226,7 +113,8 @@ impl Context {
 
             for &physical_device in physical_devices {
                 let exts = unsafe {
-                    instance
+                    basis
+                        .instance
                         .enumerate_device_extension_properties(physical_device)
                         .expect("Failed to get device extension properties.")
                 };
@@ -248,13 +136,15 @@ impl Context {
                 }
 
                 let surface_formats = unsafe {
-                    ext_surface
-                        .get_physical_device_surface_formats(physical_device, surface)
+                    basis
+                        .ext_surface
+                        .get_physical_device_surface_formats(physical_device, basis.surface)
                         .expect("Failed to query for surface formats.")
                 };
                 let present_modes = unsafe {
-                    ext_surface
-                        .get_physical_device_surface_present_modes(physical_device, surface)
+                    basis
+                        .ext_surface
+                        .get_physical_device_surface_present_modes(physical_device, basis.surface)
                         .expect("Failed to query for surface present mode.")
                 };
                 // Are there any surface formats and present modes?
@@ -262,14 +152,22 @@ impl Context {
                     continue;
                 }
 
-                let memory_properties =
-                    unsafe { instance.get_physical_device_memory_properties(physical_device) };
-                let properties =
-                    unsafe { instance.get_physical_device_properties(physical_device) };
+                let memory_properties = unsafe {
+                    basis
+                        .instance
+                        .get_physical_device_memory_properties(physical_device)
+                };
+                let properties = unsafe {
+                    basis
+                        .instance
+                        .get_physical_device_properties(physical_device)
+                };
 
                 // Queue family indices
                 let queue_families = unsafe {
-                    instance.get_physical_device_queue_family_properties(physical_device)
+                    basis
+                        .instance
+                        .get_physical_device_queue_family_properties(physical_device)
                 };
                 let opt_graphics_queue_idx = queue_families.iter().position(|&fam| {
                     fam.queue_count > 0 && fam.queue_flags.contains(vk::QueueFlags::GRAPHICS)
@@ -277,10 +175,10 @@ impl Context {
                 let opt_present_queue_idx =
                     queue_families.iter().enumerate().position(|(i, &fam)| {
                         let is_present_supported = unsafe {
-                            ext_surface.get_physical_device_surface_support(
+                            basis.ext_surface.get_physical_device_surface_support(
                                 physical_device,
                                 i as u32,
-                                surface,
+                                basis.surface,
                             )
                         };
                         fam.queue_count > 0 && is_present_supported
@@ -362,7 +260,8 @@ impl Context {
             };
 
             let device: ash::Device = unsafe {
-                instance
+                basis
+                    .instance
                     .create_device(cgpu.physical_device, &device_create_info, None)
                     .expect("Failed to create logical Device!")
             };
@@ -458,7 +357,7 @@ impl Context {
         );
 
         // TODO: Move this up?
-        let facade = Facade::new(&instance, &window, surface, &gpu, &ext_surface);
+        let facade = Facade::new(&basis, &gpu, &window);
 
         // # Uniform buffer descriptor layout
         let uniform_buffer_layout = {
@@ -642,12 +541,6 @@ impl Context {
             window,
             event_loop: Some(event_loop),
 
-            _entry: entry,
-            instance,
-            surface,
-            // - Extensions
-            ext_debug_utils,
-            ext_surface,
             // - Device
             gpu,
             facade,
@@ -663,14 +556,12 @@ impl Context {
             environment_texture,
             environment_sampler,
 
-            debug_messenger,
-            validation_layers,
-
             current_frame: 0,
             start_instant: std::time::Instant::now(),
 
             _watcher: watcher,
             watch_rx,
+            basis,
         }
     }
 
@@ -891,13 +782,6 @@ impl Drop for Context {
                 .destroy_sampler(self.environment_sampler, None);
 
             self.gpu.device.destroy_device(None);
-            self.ext_surface.destroy_surface(self.surface, None);
-
-            if !self.validation_layers.is_empty() {
-                self.ext_debug_utils
-                    .destroy_debug_utils_messenger(self.debug_messenger, None);
-            }
-            self.instance.destroy_instance(None);
         }
     }
 }

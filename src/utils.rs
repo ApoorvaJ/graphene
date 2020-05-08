@@ -1,9 +1,22 @@
 use crate::*;
+use std::os::raw::c_char;
 
 /*
-    1. Section_1: Shaders
-    2. Section_2: Command buffers
+    Section_1: Shaders
+    Section_2: Command buffers
 */
+
+pub fn vk_to_string(raw_string_array: &[c_char]) -> String {
+    let raw_string = unsafe {
+        let pointer = raw_string_array.as_ptr();
+        CStr::from_ptr(pointer)
+    };
+
+    raw_string
+        .to_str()
+        .expect("Failed to convert vulkan raw string.")
+        .to_owned()
+}
 
 /* 1. Section_1: Shaders */
 // This is required because the `vk::ShaderModuleCreateInfo` struct's `p_code`

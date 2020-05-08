@@ -23,25 +23,21 @@ pub struct Facade {
 }
 
 impl Facade {
-    pub fn new(
-        instance: &ash::Instance,
-        window: &winit::window::Window,
-        surface: vk::SurfaceKHR,
-        gpu: &Gpu,
-        ext_surface: &ash::extensions::khr::Surface,
-    ) -> Facade {
-        let ext_swapchain = ash::extensions::khr::Swapchain::new(instance, &gpu.device);
+    pub fn new(basis: &Basis, gpu: &Gpu, window: &winit::window::Window) -> Facade {
+        let ext_swapchain = ash::extensions::khr::Swapchain::new(&basis.instance, &gpu.device);
 
         // # Get surface info
         let surface_caps = unsafe {
-            ext_surface
-                .get_physical_device_surface_capabilities(gpu.physical_device, surface)
+            basis
+                .ext_surface
+                .get_physical_device_surface_capabilities(gpu.physical_device, basis.surface)
                 .expect("Failed to query for surface capabilities.")
         };
 
         let surface_formats = unsafe {
-            ext_surface
-                .get_physical_device_surface_formats(gpu.physical_device, surface)
+            basis
+                .ext_surface
+                .get_physical_device_surface_formats(gpu.physical_device, basis.surface)
                 .expect("Failed to query for surface formats.")
         };
 
@@ -85,7 +81,7 @@ impl Facade {
             let present_mode: vk::PresentModeKHR = vk::PresentModeKHR::FIFO;
 
             let mut info = vk::SwapchainCreateInfoKHR::builder()
-                .surface(surface)
+                .surface(basis.surface)
                 .min_image_count(num_frames)
                 .image_format(swapchain_format)
                 .image_color_space(swapchain_color_space)

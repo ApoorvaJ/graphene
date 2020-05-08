@@ -2,6 +2,8 @@ mod platforms;
 
 pub mod apparatus;
 pub use apparatus::*;
+pub mod basis;
+pub use basis::*;
 pub mod buffer;
 pub use buffer::*;
 pub mod context;
@@ -15,6 +17,8 @@ pub mod utils;
 pub use utils::*;
 
 use ash::version::DeviceV1_0;
+use ash::version::EntryV1_0;
+use ash::version::InstanceV1_0;
 use ash::vk;
 use std::ffi::CStr;
 use std::ffi::CString;
