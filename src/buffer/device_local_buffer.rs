@@ -6,6 +6,15 @@ pub struct DeviceLocalBuffer {
     device: ash::Device,
 }
 
+impl Drop for DeviceLocalBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_buffer(self.vk_buffer, None);
+            self.device.free_memory(self.memory, None);
+        }
+    }
+}
+
 impl DeviceLocalBuffer {
     pub fn new<T>(
         data: &[T],
@@ -55,13 +64,6 @@ impl DeviceLocalBuffer {
             vk_buffer,
             memory,
             device: gpu.device.clone(),
-        }
-    }
-
-    pub fn destroy(&self) {
-        unsafe {
-            self.device.destroy_buffer(self.vk_buffer, None);
-            self.device.free_memory(self.memory, None);
         }
     }
 }

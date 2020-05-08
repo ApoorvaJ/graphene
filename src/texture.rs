@@ -8,6 +8,16 @@ pub struct Texture {
     device: ash::Device,
 }
 
+impl Drop for Texture {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_image_view(self.image_view, None);
+            self.device.destroy_image(self.image, None);
+            self.device.free_memory(self.device_memory, None);
+        }
+    }
+}
+
 impl Texture {
     pub fn new(
         gpu: &Gpu,
@@ -94,14 +104,6 @@ impl Texture {
             device_memory,
             image_view,
             device,
-        }
-    }
-
-    pub fn destroy(&self) {
-        unsafe {
-            self.device.destroy_image_view(self.image_view, None);
-            self.device.destroy_image(self.image, None);
-            self.device.free_memory(self.device_memory, None);
         }
     }
 

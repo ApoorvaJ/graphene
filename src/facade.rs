@@ -39,8 +39,6 @@ impl Drop for Facade {
                 self.device.destroy_image_view(imageview, None);
             }
 
-            self.depth_texture.destroy();
-
             self.ext_swapchain.destroy_swapchain(self.swapchain, None);
         }
     }

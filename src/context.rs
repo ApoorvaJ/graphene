@@ -546,7 +546,6 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            // Uniform buffer
             self.gpu
                 .device
                 .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
@@ -554,12 +553,6 @@ impl Drop for Context {
                 .device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
 
-            // Vertex buffer
-            self.vertex_buffer.destroy();
-            // Index buffer
-            self.index_buffer.destroy();
-            // Texture
-            self.environment_texture.destroy();
             self.gpu
                 .device
                 .destroy_sampler(self.environment_sampler, None);
