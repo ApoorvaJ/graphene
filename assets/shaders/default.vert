@@ -15,7 +15,6 @@ out gl_PerVertex {
 };
 
 void main() {
-
     gl_Position = ubo.mtx_model_to_clip * vec4(in_pos, 1.0);
     frag_norm = in_norm;
 }
