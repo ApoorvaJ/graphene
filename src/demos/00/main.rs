@@ -6,6 +6,7 @@ const DEGREES_TO_RADIANS: f32 = PI / 180.0;
 #[allow(dead_code)]
 struct UniformBuffer {
     mtx_model_to_clip: Mat4,
+    mtx_model_to_view: Mat4,
     mtx_model_to_view_norm: Mat4,
 }
 
@@ -29,11 +30,12 @@ fn main() {
                 100.0,
             )
         };
+
+        let mtx_model_to_view = mtx_world_to_view * mtx_model_to_world;
         let ubos = [UniformBuffer {
             mtx_model_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_model_to_world,
-            mtx_model_to_view_norm: (mtx_world_to_view * mtx_model_to_world)
-                .inverse()
-                .transpose(),
+            mtx_model_to_view,
+            mtx_model_to_view_norm: mtx_model_to_view.inverse().transpose(),
         }];
 
         ctx.uniform_buffers[frame_idx].upload_data(&ubos, 0, &ctx.gpu);
