@@ -6,6 +6,7 @@ layout(set = 0, binding = 0) uniform UniformBuffer {
     mat4 mtx_model_to_clip;
     mat4 mtx_model_to_view;
     mat4 mtx_model_to_view_norm;
+    float elapsed_seconds;
 } ubo;
 layout(location = 0) in vec3 in_pos;
 layout(location = 1) in vec3 in_norm;
