@@ -20,7 +20,7 @@ fn main() {
         let mtx_model_to_world =
             Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
                 * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
-        let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 4.0))
+        let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
             * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
         let mtx_view_to_clip = {
             let extent = &ctx.facade.swapchain_extent;

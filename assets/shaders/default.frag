@@ -15,11 +15,16 @@ layout(location = 0) out vec4 out_color;
 
 const float PI = 3.14159265358979323846264338327950288;
 
+vec3 f_schlick(vec3 f0, float f90, float u) {
+    return f0 + (f90 - f0) * pow(1.0 - u, 5.0);
+}
+
 void main() {
     vec3 n = normalize(frag_norm_vs);
 
     float roughness = cos(ubo.elapsed_seconds) * 0.5 + 0.5;
     // float roughness = 1.0;
+    roughness = clamp(roughness * roughness, 1e-5, 1.0);
     vec3 v = vec3(0, 0, -1);
     // vec3 v = -normalize(frag_pos_vs);
 
@@ -56,14 +61,29 @@ void main() {
             v_ggx = 0.5 / (ggxv + ggxl);
         }
 
-        vec3 f_schlick;
+        vec3 fresnel_specular;
         {
-            vec3 f0 = vec3(0.97, 0.74, 0.62);
-            float f = pow(1.0 - l_dot_h, 5.0);
-            f_schlick = f + f0 * (1.0 - f);
+            vec3 f0 = vec3(0.04, 0.04, 0.04);
+            float f90 = 1.0;
+            fresnel_specular = f_schlick(f0, f90, l_dot_h);
         }
 
-        final += intensities[i] * n_dot_l * d_ggx * v_ggx * f_schlick;
+        float diffuse_disney;
+        {
+            float energy_bias = mix(0, 0.5, roughness);
+            float energy_factor = mix(1.0, 1.0 / 1.51, roughness);
+            float fd90 = energy_bias + 2.0 * l_dot_h * l_dot_h * roughness;
+            vec3 f0 = vec3(1.0, 1.0, 1.0);
+            float light_scatter = f_schlick(f0, fd90, n_dot_l).r;
+            float view_scatter = f_schlick(f0, fd90, n_dot_v).r;
+            diffuse_disney = light_scatter * view_scatter * energy_factor;
+        }
+
+        vec3 f_r = d_ggx * v_ggx * fresnel_specular;
+        vec3 diffuse_color = vec3(0.0, 0.6, 3.0);
+        vec3 f_d = diffuse_disney * diffuse_color;
+
+        final += intensities[i] * n_dot_l * (f_r + f_d);
     }
 
     out_color = vec4(final, 1.0);
