@@ -40,6 +40,7 @@ impl Context {
                 .device_wait_idle()
                 .expect("Failed to wait device idle!")
         };
+        self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
         let (shader_modules, _) =
             utils::get_shader_modules(&self.gpu).expect("Failed to load shader modules");
@@ -546,6 +547,9 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
+            self.facade.destroy(&self.gpu);
+
+            // Uniform buffer
             self.gpu
                 .device
                 .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
