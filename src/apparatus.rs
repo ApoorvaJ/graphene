@@ -36,7 +36,7 @@ impl Apparatus {
         num_indices: u32,
         uniform_buffer_layout: vk::DescriptorSetLayout,
         descriptor_sets: &[vk::DescriptorSet],
-        shader_modules: Vec<vk::ShaderModule>,
+        shader_modules: &Vec<vk::ShaderModule>,
     ) -> Apparatus {
         // # Create render pass
         let render_pass = {
@@ -270,12 +270,6 @@ impl Apparatus {
                     )
                     .expect("Failed to create Graphics Pipeline.")
             };
-
-            unsafe {
-                for stage in shader_modules {
-                    gpu.device.destroy_shader_module(stage, None);
-                }
-            }
 
             (graphics_pipelines[0], pipeline_layout)
         };

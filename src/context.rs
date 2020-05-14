@@ -9,6 +9,7 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
 
+    pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
     pub vertex_buffer: DeviceLocalBuffer,
     pub index_buffer: DeviceLocalBuffer,
@@ -42,8 +43,6 @@ impl Context {
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
-        let (shader_modules, _) =
-            utils::get_shader_modules(&self.gpu).expect("Failed to load shader modules");
         self.apparatus = Apparatus::new(
             &self.gpu,
             &self.facade,
@@ -53,7 +52,7 @@ impl Context {
             self.num_indices,
             self.uniform_buffer_layout,
             &self.descriptor_sets,
-            shader_modules,
+            &self.shader_modules,
         );
     }
 
@@ -313,7 +312,7 @@ impl Context {
             indices_data.len() as u32,
             uniform_buffer_layout,
             &descriptor_sets,
-            shader_modules,
+            &shader_modules,
         );
 
         // Add expect messages to all these unwraps
@@ -332,10 +331,7 @@ impl Context {
             window,
             event_loop: Some(event_loop),
 
-            // - Device
-            gpu,
-            facade,
-            apparatus,
+            shader_modules,
             command_pool,
             vertex_buffer,
             index_buffer,
@@ -352,6 +348,10 @@ impl Context {
 
             _watcher: watcher,
             watch_rx,
+
+            apparatus,
+            facade,
+            gpu,
             basis,
         }
     }
@@ -465,6 +465,14 @@ impl Context {
                     if let Some((shader_modules, num_changed)) =
                         utils::get_shader_modules(&self.gpu)
                     {
+                        // TODO: Wrap shader modules with a struct with a drop trait, and then delete this loop
+                        unsafe {
+                            for stage in &self.shader_modules {
+                                self.gpu.device.destroy_shader_module(*stage, None);
+                            }
+                        }
+                        self.shader_modules = shader_modules;
+
                         if num_changed > 0 {
                             self.apparatus = Apparatus::new(
                                 &self.gpu,
@@ -475,7 +483,7 @@ impl Context {
                                 self.num_indices,
                                 self.uniform_buffer_layout,
                                 &self.descriptor_sets,
-                                shader_modules,
+                                &self.shader_modules,
                             );
                         }
                     }
@@ -560,6 +568,10 @@ impl Drop for Context {
             self.gpu
                 .device
                 .destroy_sampler(self.environment_sampler, None);
+
+            for stage in &self.shader_modules {
+                self.gpu.device.destroy_shader_module(*stage, None);
+            }
         }
     }
 }
