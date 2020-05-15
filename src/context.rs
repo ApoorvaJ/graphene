@@ -240,7 +240,9 @@ impl Context {
             descriptor_sets
         };
 
-        let render_graphs = vec![RenderGraph::new(command_pool, &gpu); facade.num_frames];
+        let render_graphs = (0..facade.num_frames)
+            .map(|_| RenderGraph::new(command_pool, &gpu))
+            .collect();
 
         let (shader_modules, _) =
             utils::get_shader_modules(&gpu).expect("Failed to load shader modules");
@@ -286,6 +288,7 @@ impl Context {
             _watcher: watcher,
             watch_rx,
 
+            render_graphs,
             apparatus,
             facade,
             gpu,
