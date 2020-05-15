@@ -40,7 +40,7 @@ impl Basis {
         // # Create Vulkan instance
         let instance = {
             let app_name = CString::new(app_name).unwrap();
-            let engine_name = CString::new("grapheme").unwrap();
+            let engine_name = CString::new("graphene").unwrap();
             let app_info = vk::ApplicationInfo::builder()
                 .application_name(&app_name)
                 .application_version(vk_make_version!(1, 0, 0))
