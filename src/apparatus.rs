@@ -5,10 +5,8 @@ pub struct Apparatus {
 
     pub render_pass: vk::RenderPass,
     pub framebuffers: Vec<vk::Framebuffer>,
-    // - Pipelines
     pub pipeline_layout: vk::PipelineLayout,
     pub graphics_pipeline: vk::Pipeline,
-    // - Commands
     pub command_buffers: Vec<vk::CommandBuffer>,
 }
 

@@ -25,6 +25,7 @@ pub struct Context {
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 
+    pub render_graphs: Vec<RenderGraph>,
     pub apparatus: Apparatus,
     pub facade: Facade, // Resolution-dependent apparatus
     pub gpu: Gpu,
@@ -238,6 +239,8 @@ impl Context {
 
             descriptor_sets
         };
+
+        let render_graphs = vec![RenderGraph::new(command_pool, &gpu); facade.num_frames];
 
         let (shader_modules, _) =
             utils::get_shader_modules(&gpu).expect("Failed to load shader modules");

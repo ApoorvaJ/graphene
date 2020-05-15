@@ -15,6 +15,8 @@ pub mod gpu;
 pub use gpu::*;
 pub mod mesh;
 pub use mesh::*;
+pub mod render_graph;
+pub use render_graph::*;
 pub mod texture;
 pub use texture::*;
 pub mod utils;
