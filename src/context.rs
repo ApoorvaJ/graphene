@@ -11,9 +11,7 @@ pub struct Context {
 
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
-    pub vertex_buffer: DeviceLocalBuffer,
-    pub index_buffer: DeviceLocalBuffer,
-    pub num_indices: u32,
+    pub mesh: Mesh,
     pub descriptor_pool: vk::DescriptorPool,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
@@ -47,9 +45,7 @@ impl Context {
             &self.gpu,
             &self.facade,
             self.command_pool,
-            &self.vertex_buffer,
-            &self.index_buffer,
-            self.num_indices,
+            &self.mesh,
             self.uniform_buffer_layout,
             &self.descriptor_sets,
             &self.shader_modules,
@@ -86,65 +82,7 @@ impl Context {
             }
         };
 
-        // # Load mesh
-        // TODO: Benchmark and optimize
-        let (vertices_data, indices_data) = {
-            let mut vertices_data: Vec<f32> = Vec::new();
-            let mut indices_data: Vec<u32> = Vec::new();
-
-            let (gltf, buffers, _) =
-                gltf::import("assets/meshes/suzanne.glb").expect("Failed to open mesh.");
-            for mesh in gltf.meshes() {
-                for primitive in mesh.primitives() {
-                    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                    if let Some(iter_pos) = reader.read_positions() {
-                        if let Some(iter_norm) = reader.read_normals() {
-                            for (pos, norm) in iter_pos.zip(iter_norm) {
-                                vertices_data.extend_from_slice(&pos);
-                                vertices_data.extend_from_slice(&norm);
-                            }
-                        }
-                    }
-                    if let Some(iter) = reader.read_indices() {
-                        match iter {
-                            gltf::mesh::util::ReadIndices::U8(iter_2) => {
-                                for idx in iter_2 {
-                                    indices_data.push(idx as u32);
-                                }
-                            }
-                            gltf::mesh::util::ReadIndices::U16(iter_2) => {
-                                for idx in iter_2 {
-                                    indices_data.push(idx as u32);
-                                }
-                            }
-                            gltf::mesh::util::ReadIndices::U32(iter_2) => {
-                                for idx in iter_2 {
-                                    indices_data.push(idx as u32);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            (vertices_data, indices_data)
-        };
-
-        // # Create and upload the vertex buffer
-        let vertex_buffer = DeviceLocalBuffer::new(
-            &vertices_data,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            &gpu,
-            command_pool,
-        );
-
-        // # Create and upload index buffer
-        let index_buffer = DeviceLocalBuffer::new(
-            &indices_data,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            &gpu,
-            command_pool,
-        );
+        let mesh = Mesh::load("assets/meshes/suzanne.glb", &gpu, command_pool);
 
         // TODO: Move this up?
         let facade = Facade::new(&basis, &gpu, &window);
@@ -307,9 +245,7 @@ impl Context {
             &gpu,
             &facade,
             command_pool,
-            &vertex_buffer,
-            &index_buffer,
-            indices_data.len() as u32,
+            &mesh,
             uniform_buffer_layout,
             &descriptor_sets,
             &shader_modules,
@@ -333,9 +269,7 @@ impl Context {
 
             shader_modules,
             command_pool,
-            vertex_buffer,
-            index_buffer,
-            num_indices: indices_data.len() as u32,
+            mesh,
             descriptor_pool,
             descriptor_sets,
             uniform_buffer_layout,
@@ -478,9 +412,7 @@ impl Context {
                                 &self.gpu,
                                 &self.facade,
                                 self.command_pool,
-                                &self.vertex_buffer,
-                                &self.index_buffer,
-                                self.num_indices,
+                                &self.mesh,
                                 self.uniform_buffer_layout,
                                 &self.descriptor_sets,
                                 &self.shader_modules,

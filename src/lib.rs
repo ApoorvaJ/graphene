@@ -13,6 +13,8 @@ pub mod facade;
 pub use facade::*;
 pub mod gpu;
 pub use gpu::*;
+pub mod mesh;
+pub use mesh::*;
 pub mod texture;
 pub use texture::*;
 pub mod utils;

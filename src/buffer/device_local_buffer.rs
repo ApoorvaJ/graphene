@@ -3,6 +3,7 @@ use crate::*;
 pub struct DeviceLocalBuffer {
     pub vk_buffer: vk::Buffer,
     pub memory: vk::DeviceMemory,
+    pub num_elements: usize,
     device: ash::Device,
 }
 
@@ -63,6 +64,7 @@ impl DeviceLocalBuffer {
         DeviceLocalBuffer {
             vk_buffer,
             memory,
+            num_elements: data.len(),
             device: gpu.device.clone(),
         }
     }
