@@ -7,7 +7,6 @@ pub struct Apparatus {
     pub framebuffers: Vec<vk::Framebuffer>,
     pub pipeline_layout: vk::PipelineLayout,
     pub graphics_pipeline: vk::Pipeline,
-    pub command_buffers: Vec<vk::CommandBuffer>,
 }
 
 impl Drop for Apparatus {
@@ -28,10 +27,7 @@ impl Apparatus {
     pub fn new(
         gpu: &Gpu,
         facade: &Facade,
-        command_pool: vk::CommandPool,
-        mesh: &Mesh,
         uniform_buffer_layout: vk::DescriptorSetLayout,
-        descriptor_sets: &[vk::DescriptorSet],
         shader_modules: &Vec<vk::ShaderModule>,
     ) -> Apparatus {
         // # Create render pass
@@ -270,123 +266,110 @@ impl Apparatus {
             (graphics_pipelines[0], pipeline_layout)
         };
 
-        // # Allocate command buffers
-        let command_buffers = {
-            let info = vk::CommandBufferAllocateInfo::builder()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(facade.num_frames as u32);
-
-            unsafe {
-                gpu.device
-                    .allocate_command_buffers(&info)
-                    .expect("Failed to allocate command buffer.")
-            }
-        };
-
-        // # Record command buffers
-        for (i, &command_buffer) in command_buffers.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-
-            unsafe {
-                gpu.device
-                    .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                    .expect("Failed to begin recording command buffer.");
-            }
-
-            let clear_values = [
-                vk::ClearValue {
-                    // Clear value for color buffer
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                },
-                vk::ClearValue {
-                    // Clear value for depth buffer
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 1.0,
-                        stencil: 0,
-                    },
-                },
-            ];
-
-            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-                .render_pass(render_pass)
-                .framebuffer(framebuffers[i])
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: facade.swapchain_extent,
-                })
-                .clear_values(&clear_values);
-
-            unsafe {
-                gpu.device.cmd_begin_render_pass(
-                    command_buffer,
-                    &render_pass_begin_info,
-                    vk::SubpassContents::INLINE,
-                );
-                gpu.device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    graphics_pipeline,
-                );
-
-                // Bind index and vertex buffers
-                {
-                    let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
-                    let offsets = [0_u64];
-                    gpu.device.cmd_bind_vertex_buffers(
-                        command_buffer,
-                        0,
-                        &vertex_buffers,
-                        &offsets,
-                    );
-                    gpu.device.cmd_bind_index_buffer(
-                        command_buffer,
-                        mesh.index_buffer.vk_buffer,
-                        0,
-                        vk::IndexType::UINT32,
-                    );
-                }
-
-                // Bind descriptor sets
-                {
-                    let sets = [descriptor_sets[i]];
-                    gpu.device.cmd_bind_descriptor_sets(
-                        command_buffer,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipeline_layout,
-                        0,
-                        &sets,
-                        &[],
-                    );
-                }
-
-                gpu.device.cmd_draw_indexed(
-                    command_buffer,
-                    mesh.index_buffer.num_elements as u32,
-                    1,
-                    0,
-                    0,
-                    0,
-                );
-
-                gpu.device.cmd_end_render_pass(command_buffer);
-
-                gpu.device
-                    .end_command_buffer(command_buffer)
-                    .expect("Failed to end recording command buffer.");
-            }
-        }
-
         Apparatus {
             device: gpu.device.clone(),
             render_pass,
             framebuffers,
             graphics_pipeline,
             pipeline_layout,
-            command_buffers,
+        }
+    }
+
+    pub fn record_command_buffer(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        mesh: &Mesh,
+        descriptor_sets: &[vk::DescriptorSet],
+        facade: &Facade,
+        idx: usize,
+    ) {
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+
+        unsafe {
+            self.device
+                .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+                .expect("Failed to begin recording command buffer.");
+        }
+
+        let clear_values = [
+            vk::ClearValue {
+                // Clear value for color buffer
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            },
+            vk::ClearValue {
+                // Clear value for depth buffer
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+        ];
+
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(self.render_pass)
+            .framebuffer(self.framebuffers[idx])
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: facade.swapchain_extent,
+            })
+            .clear_values(&clear_values);
+
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                command_buffer,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+            self.device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipeline,
+            );
+
+            // Bind index and vertex buffers
+            {
+                let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
+                let offsets = [0_u64];
+                self.device
+                    .cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+                self.device.cmd_bind_index_buffer(
+                    command_buffer,
+                    mesh.index_buffer.vk_buffer,
+                    0,
+                    vk::IndexType::UINT32,
+                );
+            }
+
+            // Bind descriptor sets
+            {
+                let sets = [descriptor_sets[idx]];
+                self.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &sets,
+                    &[],
+                );
+            }
+
+            self.device.cmd_draw_indexed(
+                command_buffer,
+                mesh.index_buffer.num_elements as u32,
+                1,
+                0,
+                0,
+                0,
+            );
+
+            self.device.cmd_end_render_pass(command_buffer);
+
+            self.device
+                .end_command_buffer(command_buffer)
+                .expect("Failed to end recording command buffer.");
         }
     }
 }

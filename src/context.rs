@@ -25,7 +25,8 @@ pub struct Context {
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 
-    pub render_graphs: Vec<RenderGraph>,
+    pub command_buffers: Vec<vk::CommandBuffer>,
+    pub render_graph: RenderGraph,
     pub apparatus: Apparatus,
     pub facade: Facade, // Resolution-dependent apparatus
     pub gpu: Gpu,
@@ -45,12 +46,28 @@ impl Context {
         self.apparatus = Apparatus::new(
             &self.gpu,
             &self.facade,
-            self.command_pool,
-            &self.mesh,
             self.uniform_buffer_layout,
-            &self.descriptor_sets,
             &self.shader_modules,
         );
+
+        for i in 0..self.command_buffers.len() {
+            unsafe {
+                self.gpu
+                    .device
+                    .reset_command_buffer(
+                        self.command_buffers[i],
+                        vk::CommandBufferResetFlags::empty(),
+                    )
+                    .unwrap();
+            }
+            self.apparatus.record_command_buffer(
+                self.command_buffers[i],
+                &self.mesh,
+                &self.descriptor_sets,
+                &self.facade,
+                i,
+            );
+        }
     }
 
     pub fn new(uniform_buffer_size: usize) -> Context {
@@ -240,21 +257,42 @@ impl Context {
             descriptor_sets
         };
 
-        let render_graphs = (0..facade.num_frames)
-            .map(|_| RenderGraph::new(command_pool, &gpu))
-            .collect();
+        // # Allocate command buffers
+        let command_buffers = {
+            let info = vk::CommandBufferAllocateInfo::builder()
+                .command_pool(command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(facade.num_frames as u32);
+
+            unsafe {
+                gpu.device
+                    .allocate_command_buffers(&info)
+                    .expect("Failed to allocate command buffer.")
+            }
+        };
+
+        // Create render graph
+        let mut render_graph = RenderGraph::new(&gpu);
+        // TODO: Move this to main.rs
+        render_graph.add_pass(
+            RenderPass::new("gbuffer")
+                .with_output_texture("emissive")
+                .with_output_texture("pbr"),
+        );
 
         let (shader_modules, _) =
             utils::get_shader_modules(&gpu).expect("Failed to load shader modules");
-        let apparatus = Apparatus::new(
-            &gpu,
-            &facade,
-            command_pool,
-            &mesh,
-            uniform_buffer_layout,
-            &descriptor_sets,
-            &shader_modules,
-        );
+        let apparatus = Apparatus::new(&gpu, &facade, uniform_buffer_layout, &shader_modules);
+
+        for i in 0..command_buffers.len() {
+            apparatus.record_command_buffer(
+                command_buffers[i],
+                &mesh,
+                &descriptor_sets,
+                &facade,
+                i,
+            );
+        }
 
         // Add expect messages to all these unwraps
         let (watcher, watch_rx) = {
@@ -288,7 +326,8 @@ impl Context {
             _watcher: watcher,
             watch_rx,
 
-            render_graphs,
+            command_buffers,
+            render_graph,
             apparatus,
             facade,
             gpu,
@@ -336,7 +375,7 @@ impl Context {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.facade.image_available_semaphores[self.current_frame]];
         let signal_semaphores = [self.facade.render_finished_semaphores[self.current_frame]];
-        let command_buffers = [self.apparatus.command_buffers[image_index as usize]];
+        let command_buffers = [self.command_buffers[image_index as usize]];
 
         let submit_infos = [vk::SubmitInfo {
             wait_semaphore_count: wait_semaphores.len() as u32,
@@ -417,10 +456,7 @@ impl Context {
                             self.apparatus = Apparatus::new(
                                 &self.gpu,
                                 &self.facade,
-                                self.command_pool,
-                                &self.mesh,
                                 self.uniform_buffer_layout,
-                                &self.descriptor_sets,
                                 &self.shader_modules,
                             );
                         }
