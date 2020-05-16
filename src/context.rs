@@ -33,6 +33,38 @@ pub struct Context {
     pub basis: Basis,
 }
 
+impl Drop for Context {
+    fn drop(&mut self) {
+        unsafe {
+            self.gpu
+                .device
+                .free_command_buffers(self.command_pool, &self.command_buffers);
+
+            self.gpu
+                .device
+                .destroy_command_pool(self.command_pool, None);
+
+            self.facade.destroy(&self.gpu);
+
+            // Uniform buffer
+            self.gpu
+                .device
+                .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
+            self.gpu
+                .device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+
+            self.gpu
+                .device
+                .destroy_sampler(self.environment_sampler, None);
+
+            for stage in &self.shader_modules {
+                self.gpu.device.destroy_shader_module(*stage, None);
+            }
+        }
+    }
+}
+
 impl Context {
     pub fn recreate_resolution_dependent_state(&mut self) {
         unsafe {
@@ -519,33 +551,5 @@ impl Context {
                 }
                 _ => (),
             })
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        unsafe {
-            self.gpu
-                .device
-                .destroy_command_pool(self.command_pool, None);
-
-            self.facade.destroy(&self.gpu);
-
-            // Uniform buffer
-            self.gpu
-                .device
-                .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
-            self.gpu
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-
-            self.gpu
-                .device
-                .destroy_sampler(self.environment_sampler, None);
-
-            for stage in &self.shader_modules {
-                self.gpu.device.destroy_shader_module(*stage, None);
-            }
-        }
     }
 }
