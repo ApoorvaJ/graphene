@@ -27,7 +27,6 @@ pub struct Context {
 
     pub command_buffers: Vec<vk::CommandBuffer>,
     pub render_graph: RenderGraph,
-    pub apparatus: Apparatus,
     pub facade: Facade, // Resolution-dependent apparatus
     pub gpu: Gpu,
     pub basis: Basis,
@@ -75,13 +74,19 @@ impl Context {
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
-        self.apparatus = Apparatus::new(
-            &self.gpu,
-            &self.facade,
-            self.uniform_buffer_layout,
-            &self.shader_modules,
-        );
+        self.render_graph = RenderGraphBuilder::new(&self.gpu)
+            .add_pass(
+                RenderPass::new("gbuffer")
+                    .with_output_texture("emissive")
+                    .with_output_texture("pbr"),
+            )
+            .build(
+                &self.facade,
+                &self.shader_modules,
+                self.uniform_buffer_layout,
+            );
 
+        // TODO: Move this to the frame loop
         for i in 0..self.command_buffers.len() {
             unsafe {
                 self.gpu
@@ -92,7 +97,7 @@ impl Context {
                     )
                     .unwrap();
             }
-            self.apparatus.record_command_buffer(
+            self.render_graph.record_command_buffer(
                 self.command_buffers[i],
                 &self.mesh,
                 &self.descriptor_sets,
@@ -303,21 +308,21 @@ impl Context {
             }
         };
 
-        // Create render graph
-        let mut render_graph = RenderGraph::new(&gpu);
-        // TODO: Move this to main.rs
-        render_graph.add_pass(
-            RenderPass::new("gbuffer")
-                .with_output_texture("emissive")
-                .with_output_texture("pbr"),
-        );
-
         let (shader_modules, _) =
             utils::get_shader_modules(&gpu).expect("Failed to load shader modules");
-        let apparatus = Apparatus::new(&gpu, &facade, uniform_buffer_layout, &shader_modules);
+
+        // Create render graph
+        // TODO: Move this to main.rs
+        let render_graph = RenderGraphBuilder::new(&gpu)
+            .add_pass(
+                RenderPass::new("gbuffer")
+                    .with_output_texture("emissive")
+                    .with_output_texture("pbr"),
+            )
+            .build(&facade, &shader_modules, uniform_buffer_layout);
 
         for i in 0..command_buffers.len() {
-            apparatus.record_command_buffer(
+            render_graph.record_command_buffer(
                 command_buffers[i],
                 &mesh,
                 &descriptor_sets,
@@ -360,7 +365,6 @@ impl Context {
 
             command_buffers,
             render_graph,
-            apparatus,
             facade,
             gpu,
             basis,
@@ -485,12 +489,36 @@ impl Context {
                         self.shader_modules = shader_modules;
 
                         if num_changed > 0 {
-                            self.apparatus = Apparatus::new(
-                                &self.gpu,
-                                &self.facade,
-                                self.uniform_buffer_layout,
-                                &self.shader_modules,
-                            );
+                            // TODO: Delete this. Do this every frame instead.
+                            self.render_graph = RenderGraphBuilder::new(&self.gpu)
+                                .add_pass(
+                                    RenderPass::new("gbuffer")
+                                        .with_output_texture("emissive")
+                                        .with_output_texture("pbr"),
+                                )
+                                .build(
+                                    &self.facade,
+                                    &self.shader_modules,
+                                    self.uniform_buffer_layout,
+                                );
+                            for i in 0..self.command_buffers.len() {
+                                unsafe {
+                                    self.gpu
+                                        .device
+                                        .reset_command_buffer(
+                                            self.command_buffers[i],
+                                            vk::CommandBufferResetFlags::empty(),
+                                        )
+                                        .unwrap();
+                                }
+                                self.render_graph.record_command_buffer(
+                                    self.command_buffers[i],
+                                    &self.mesh,
+                                    &self.descriptor_sets,
+                                    &self.facade,
+                                    i,
+                                );
+                            }
                         }
                     }
                 }

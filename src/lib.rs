@@ -1,7 +1,5 @@
 mod platforms;
 
-pub mod apparatus;
-pub use apparatus::*;
 pub mod basis;
 pub use basis::*;
 pub mod buffer;
