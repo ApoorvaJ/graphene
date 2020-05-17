@@ -64,6 +64,35 @@ impl Drop for Context {
     }
 }
 
+// TODO: Delete this function, and call every loop. An in-flight render graph
+// cannot be destroyed, so we'll probably need one per swapchain image.
+fn create_render_graph(
+    gpu: &Gpu,
+    facade: &Facade,
+    shader_modules: &Vec<vk::ShaderModule>,
+    uniform_buffer_layout: vk::DescriptorSetLayout,
+    command_buffers: &Vec<vk::CommandBuffer>,
+    mesh: &Mesh,
+    descriptor_sets: &Vec<vk::DescriptorSet>,
+) -> RenderGraph {
+    let render_graph = RenderGraphBuilder::new(gpu)
+        .add_pass(
+            RenderPass::new("gbuffer")
+                .with_output_texture("emissive")
+                .with_output_texture("pbr"),
+        )
+        .build(facade, shader_modules, uniform_buffer_layout);
+    for i in 0..command_buffers.len() {
+        unsafe {
+            gpu.device
+                .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
+                .unwrap();
+        }
+        render_graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, facade, i);
+    }
+    render_graph
+}
+
 impl Context {
     pub fn recreate_resolution_dependent_state(&mut self) {
         unsafe {
@@ -74,37 +103,15 @@ impl Context {
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
-        self.render_graph = RenderGraphBuilder::new(&self.gpu)
-            .add_pass(
-                RenderPass::new("gbuffer")
-                    .with_output_texture("emissive")
-                    .with_output_texture("pbr"),
-            )
-            .build(
-                &self.facade,
-                &self.shader_modules,
-                self.uniform_buffer_layout,
-            );
-
-        // TODO: Move this to the frame loop
-        for i in 0..self.command_buffers.len() {
-            unsafe {
-                self.gpu
-                    .device
-                    .reset_command_buffer(
-                        self.command_buffers[i],
-                        vk::CommandBufferResetFlags::empty(),
-                    )
-                    .unwrap();
-            }
-            self.render_graph.record_command_buffer(
-                self.command_buffers[i],
-                &self.mesh,
-                &self.descriptor_sets,
-                &self.facade,
-                i,
-            );
-        }
+        self.render_graph = create_render_graph(
+            &self.gpu,
+            &self.facade,
+            &self.shader_modules,
+            self.uniform_buffer_layout,
+            &self.command_buffers,
+            &self.mesh,
+            &self.descriptor_sets,
+        );
     }
 
     pub fn new(uniform_buffer_size: usize) -> Context {
@@ -313,23 +320,15 @@ impl Context {
 
         // Create render graph
         // TODO: Move this to main.rs
-        let render_graph = RenderGraphBuilder::new(&gpu)
-            .add_pass(
-                RenderPass::new("gbuffer")
-                    .with_output_texture("emissive")
-                    .with_output_texture("pbr"),
-            )
-            .build(&facade, &shader_modules, uniform_buffer_layout);
-
-        for i in 0..command_buffers.len() {
-            render_graph.record_command_buffer(
-                command_buffers[i],
-                &mesh,
-                &descriptor_sets,
-                &facade,
-                i,
-            );
-        }
+        let render_graph = create_render_graph(
+            &gpu,
+            &facade,
+            &shader_modules,
+            uniform_buffer_layout,
+            &command_buffers,
+            &mesh,
+            &descriptor_sets,
+        );
 
         // Add expect messages to all these unwraps
         let (watcher, watch_rx) = {
@@ -490,35 +489,15 @@ impl Context {
 
                         if num_changed > 0 {
                             // TODO: Delete this. Do this every frame instead.
-                            self.render_graph = RenderGraphBuilder::new(&self.gpu)
-                                .add_pass(
-                                    RenderPass::new("gbuffer")
-                                        .with_output_texture("emissive")
-                                        .with_output_texture("pbr"),
-                                )
-                                .build(
-                                    &self.facade,
-                                    &self.shader_modules,
-                                    self.uniform_buffer_layout,
-                                );
-                            for i in 0..self.command_buffers.len() {
-                                unsafe {
-                                    self.gpu
-                                        .device
-                                        .reset_command_buffer(
-                                            self.command_buffers[i],
-                                            vk::CommandBufferResetFlags::empty(),
-                                        )
-                                        .unwrap();
-                                }
-                                self.render_graph.record_command_buffer(
-                                    self.command_buffers[i],
-                                    &self.mesh,
-                                    &self.descriptor_sets,
-                                    &self.facade,
-                                    i,
-                                );
-                            }
+                            self.render_graph = create_render_graph(
+                                &self.gpu,
+                                &self.facade,
+                                &self.shader_modules,
+                                self.uniform_buffer_layout,
+                                &self.command_buffers,
+                                &self.mesh,
+                                &self.descriptor_sets,
+                            );
                         }
                     }
                 }
