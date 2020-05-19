@@ -155,18 +155,14 @@ impl RenderGraphBuilder {
                 ..Default::default()
             };
 
+            // Initialize to defaults. It will be ignored because pipeline viewport is dynamic.
             let viewports = [vk::Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: facade.swapchain_extent.width as f32,
-                height: facade.swapchain_extent.height as f32,
-                min_depth: 0.0,
-                max_depth: 1.0,
+                ..Default::default()
             }];
 
+            // Initialize to defaults. It will be ignored because pipeline scissor is dynamic.
             let scissors = [vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: facade.swapchain_extent,
+                ..Default::default()
             }];
 
             let viewport_state_create_info = vk::PipelineViewportStateCreateInfo {
@@ -227,6 +223,15 @@ impl RenderGraphBuilder {
                     .expect("Failed to create pipeline layout.")
             };
 
+            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+            let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo {
+                s_type: vk::StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: ash::vk::PipelineDynamicStateCreateFlags::empty(),
+                dynamic_state_count: dynamic_states.len() as u32,
+                p_dynamic_states: dynamic_states.as_ptr(),
+            };
+
             let graphic_pipeline_create_infos = [vk::GraphicsPipelineCreateInfo {
                 stage_count: shader_stages.len() as u32,
                 p_stages: shader_stages.as_ptr(),
@@ -238,7 +243,7 @@ impl RenderGraphBuilder {
                 p_multisample_state: &multisample_state_create_info,
                 p_depth_stencil_state: &depth_state_create_info,
                 p_color_blend_state: &color_blend_state,
-                p_dynamic_state: ptr::null(), // No dynamic state
+                p_dynamic_state: &dynamic_state_create_info, // No dynamic state
                 layout: pipeline_layout,
                 render_pass,
                 subpass: 0,

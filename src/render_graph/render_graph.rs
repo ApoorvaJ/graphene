@@ -78,6 +78,24 @@ impl RenderGraph {
                 self.graphics_pipeline,
             );
 
+            // Set viewport and scissor
+            {
+                let viewports = [vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: facade.swapchain_extent.width as f32,
+                    height: facade.swapchain_extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }];
+                self.device.cmd_set_viewport(command_buffer, 0, &viewports);
+
+                let scissors = [vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: facade.swapchain_extent,
+                }];
+                self.device.cmd_set_scissor(command_buffer, 0, &scissors);
+            }
             // Bind index and vertex buffers
             {
                 let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
