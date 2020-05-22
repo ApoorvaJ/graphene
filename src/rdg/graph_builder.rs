@@ -29,6 +29,15 @@ impl<'a> GraphBuilder<'a> {
         // # Create render pass
         let render_pass = {
             let mut attachments: Vec<vk::AttachmentDescription> = Vec::new();
+            let mut attachment_idx = 0;
+            let mut depth_attachment_ptr = ptr::null();
+            let mut color_attachments = Vec::new();
+
+            // Depth attachment description and reference
+            let depth_attachment = vk::AttachmentReference {
+                attachment: 0,
+                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            };
             if let Some(depth_tex) = pass.opt_output_depth {
                 attachments.push(vk::AttachmentDescription {
                     format: depth_tex.format,
@@ -41,7 +50,12 @@ impl<'a> GraphBuilder<'a> {
                     initial_layout: vk::ImageLayout::UNDEFINED,
                     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 });
+
+                depth_attachment_ptr = &depth_attachment;
+                attachment_idx += 1;
             }
+
+            // Color attachment descriptions and references
             for color_tex in &pass.outputs_color {
                 attachments.push(vk::AttachmentDescription {
                     format: color_tex.format,
@@ -54,22 +68,18 @@ impl<'a> GraphBuilder<'a> {
                     initial_layout: vk::ImageLayout::UNDEFINED,
                     final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
                 });
+                color_attachments.push(vk::AttachmentReference {
+                    attachment: attachment_idx,
+                    layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                });
+                attachment_idx += 1;
             }
-
-            let depth_attachment_ref = vk::AttachmentReference {
-                attachment: 0,
-                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            };
-            let color_attachment_ref = [vk::AttachmentReference {
-                attachment: 1,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }];
 
             let subpasses = [vk::SubpassDescription {
                 pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
                 color_attachment_count: 1,
-                p_color_attachments: color_attachment_ref.as_ptr(),
-                p_depth_stencil_attachment: &depth_attachment_ref,
+                p_color_attachments: color_attachments.as_ptr(),
+                p_depth_stencil_attachment: depth_attachment_ptr,
                 ..Default::default()
             }];
 
