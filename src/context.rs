@@ -80,8 +80,8 @@ fn create_render_graph(
             let graph = GraphBuilder::new(gpu)
                 .add_pass(
                     Pass::new("forward lit")
-                        .with_output_texture(&facade.depth_texture)
-                        .with_output_texture(&facade.swapchain_textures[i]),
+                        .with_output_depth(&facade.depth_texture)
+                        .with_output_color(&facade.swapchain_textures[i]),
                 )
                 .build(shader_modules, uniform_buffer_layout);
 

@@ -28,37 +28,33 @@ impl<'a> GraphBuilder<'a> {
 
         // # Create render pass
         let render_pass = {
-            let attachments: Vec<vk::AttachmentDescription> = pass
-                .output_textures
-                .iter()
-                .enumerate()
-                .map(|(idx, tex)| {
-                    // TODO: Derive load and store ops from graph
-                    let store_op = if idx == 1 {
-                        vk::AttachmentStoreOp::STORE
-                    } else {
-                        vk::AttachmentStoreOp::DONT_CARE
-                    };
-                    // TODO: Embed this into texture params
-                    let final_layout = if idx == 1 {
-                        vk::ImageLayout::PRESENT_SRC_KHR
-                    } else {
-                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                    };
-                    //
-                    vk::AttachmentDescription {
-                        format: tex.format,
-                        flags: vk::AttachmentDescriptionFlags::empty(),
-                        samples: vk::SampleCountFlags::TYPE_1,
-                        load_op: vk::AttachmentLoadOp::CLEAR,
-                        store_op,
-                        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                        initial_layout: vk::ImageLayout::UNDEFINED,
-                        final_layout,
-                    }
-                })
-                .collect();
+            let mut attachments: Vec<vk::AttachmentDescription> = Vec::new();
+            if let Some(depth_tex) = pass.opt_output_depth {
+                attachments.push(vk::AttachmentDescription {
+                    format: depth_tex.format,
+                    flags: vk::AttachmentDescriptionFlags::empty(),
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    load_op: vk::AttachmentLoadOp::CLEAR,
+                    store_op: vk::AttachmentStoreOp::DONT_CARE, // TODO: Derive from graph
+                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                });
+            }
+            for color_tex in &pass.outputs_color {
+                attachments.push(vk::AttachmentDescription {
+                    format: color_tex.format,
+                    flags: vk::AttachmentDescriptionFlags::empty(),
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    load_op: vk::AttachmentLoadOp::CLEAR,
+                    store_op: vk::AttachmentStoreOp::STORE, // TODO: Derive from graph
+                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                });
+            }
 
             let depth_attachment_ref = vk::AttachmentReference {
                 attachment: 0,
@@ -90,22 +86,29 @@ impl<'a> GraphBuilder<'a> {
 
         // # Create framebuffer
         let framebuffer: vk::Framebuffer = {
-            let attachments: Vec<vk::ImageView> = pass
-                .output_textures
-                .iter()
-                .map(|tex| tex.image_view)
-                .collect();
-
-            assert!(
-                pass.output_textures[0].width == pass.output_textures[1].width
-                    && pass.output_textures[0].height == pass.output_textures[1].height
-            );
+            let (w, h) = if let Some(depth_tex) = pass.opt_output_depth {
+                (depth_tex.width, depth_tex.height)
+            } else {
+                assert!(
+                    pass.outputs_color.len() > 0,
+                    "At least a depth texture or a single color texture needs to be bound."
+                );
+                (pass.outputs_color[0].width, pass.outputs_color[0].height)
+            };
+            // TODO: Assert that color and depth textures have the same resolution
+            let mut attachments: Vec<vk::ImageView> = Vec::new();
+            if let Some(depth_tex) = pass.opt_output_depth {
+                attachments.push(depth_tex.image_view);
+            }
+            for color_tex in &pass.outputs_color {
+                attachments.push(color_tex.image_view);
+            }
 
             let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
                 .attachments(&attachments)
-                .width(pass.output_textures[0].width)
-                .height(pass.output_textures[0].height)
+                .width(w)
+                .height(h)
                 .layers(1);
 
             unsafe {

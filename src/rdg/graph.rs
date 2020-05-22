@@ -40,7 +40,7 @@ impl Graph {
         }
 
         let clear_values = [
-            // TODO: Derive load and store ops from graph
+            // TODO: Derive clear behavior from graph
             vk::ClearValue {
                 // Clear value for depth buffer
                 depth_stencil: vk::ClearDepthStencilValue {
