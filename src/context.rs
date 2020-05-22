@@ -83,7 +83,7 @@ fn create_render_graph(
                         .with_output_texture(&facade.swapchain_textures[i])
                         .with_output_texture(&facade.depth_texture),
                 )
-                .build(facade, shader_modules, uniform_buffer_layout);
+                .build(shader_modules, uniform_buffer_layout);
 
             unsafe {
                 gpu.device

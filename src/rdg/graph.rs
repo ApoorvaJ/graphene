@@ -3,7 +3,7 @@ use crate::*;
 pub struct Graph {
     pub device: ash::Device,
     pub render_pass: vk::RenderPass,
-    pub framebuffers: Vec<vk::Framebuffer>,
+    pub framebuffer: vk::Framebuffer,
     pub pipeline_layout: vk::PipelineLayout,
     pub graphics_pipeline: vk::Pipeline,
 }
@@ -14,9 +14,7 @@ impl Drop for Graph {
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
-            for &framebuffer in self.framebuffers.iter() {
-                self.device.destroy_framebuffer(framebuffer, None);
-            }
+            self.device.destroy_framebuffer(self.framebuffer, None);
             self.device.destroy_render_pass(self.render_pass, None);
         }
     }
@@ -64,7 +62,7 @@ impl Graph {
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(self.render_pass)
-            .framebuffer(self.framebuffers[idx])
+            .framebuffer(self.framebuffer)
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent,

@@ -1,8 +1,8 @@
 use crate::*;
 
 pub struct Pass<'a> {
-    _name: String,
-    output_textures: Vec<&'a Texture>, // The textures must live at least as long as the pass
+    pub _name: String,
+    pub output_textures: Vec<&'a Texture>, // The textures must live at least as long as the pass
 }
 
 impl<'a> Pass<'a> {

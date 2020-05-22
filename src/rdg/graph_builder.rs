@@ -21,38 +21,43 @@ impl<'a> GraphBuilder<'a> {
     pub fn build(
         self,
         // TODO: Remove these params
-        facade: &Facade,
         shader_modules: &Vec<vk::ShaderModule>,
         uniform_buffer_layout: vk::DescriptorSetLayout,
     ) -> Graph {
+        let pass = &self.passes[0];
+
         // # Create render pass
         let render_pass = {
-            let attachments = vec![
-                // Color attachment
-                vk::AttachmentDescription {
-                    format: facade.swapchain_textures[0].format,
-                    flags: vk::AttachmentDescriptionFlags::empty(),
-                    samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::CLEAR,
-                    store_op: vk::AttachmentStoreOp::STORE,
-                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                    initial_layout: vk::ImageLayout::UNDEFINED,
-                    final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                },
-                // Depth attachment
-                vk::AttachmentDescription {
-                    format: facade.depth_texture.format,
-                    flags: vk::AttachmentDescriptionFlags::empty(),
-                    samples: vk::SampleCountFlags::TYPE_1,
-                    load_op: vk::AttachmentLoadOp::CLEAR,
-                    store_op: vk::AttachmentStoreOp::DONT_CARE,
-                    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE, // ?
-                    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE, // ?
-                    initial_layout: vk::ImageLayout::UNDEFINED,
-                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                },
-            ];
+            let attachments: Vec<vk::AttachmentDescription> = pass
+                .output_textures
+                .iter()
+                .enumerate()
+                .map(|(idx, tex)| {
+                    // TODO: Embed this into texture params
+                    let store_op = if idx == 0 {
+                        vk::AttachmentStoreOp::STORE
+                    } else {
+                        vk::AttachmentStoreOp::DONT_CARE
+                    };
+                    let final_layout = if idx == 0 {
+                        vk::ImageLayout::PRESENT_SRC_KHR
+                    } else {
+                        vk::ImageLayout::PRESENT_SRC_KHR
+                    };
+                    //
+                    vk::AttachmentDescription {
+                        format: tex.format,
+                        flags: vk::AttachmentDescriptionFlags::empty(),
+                        samples: vk::SampleCountFlags::TYPE_1,
+                        load_op: vk::AttachmentLoadOp::CLEAR,
+                        store_op,
+                        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                        initial_layout: vk::ImageLayout::UNDEFINED,
+                        final_layout,
+                    }
+                })
+                .collect();
 
             let color_attachment_ref = [vk::AttachmentReference {
                 attachment: 0,
@@ -82,31 +87,31 @@ impl<'a> GraphBuilder<'a> {
             }
         };
 
-        // # Create framebuffers
-        let framebuffers: Vec<vk::Framebuffer> = {
-            facade
-                .swapchain_textures
+        // # Create framebuffer
+        let framebuffer: vk::Framebuffer = {
+            let attachments: Vec<vk::ImageView> = pass
+                .output_textures
                 .iter()
-                .map(|swapchain_texture| {
-                    let attachments = [
-                        swapchain_texture.image_view,
-                        facade.depth_texture.image_view,
-                    ];
+                .map(|tex| tex.image_view)
+                .collect();
 
-                    let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
-                        .render_pass(render_pass)
-                        .attachments(&attachments)
-                        .width(swapchain_texture.width)
-                        .height(swapchain_texture.height)
-                        .layers(1);
+            assert!(
+                pass.output_textures[0].width == pass.output_textures[1].width
+                    && pass.output_textures[0].height == pass.output_textures[1].height
+            );
 
-                    unsafe {
-                        self.device
-                            .create_framebuffer(&framebuffer_create_info, None)
-                            .expect("Failed to create Framebuffer!")
-                    }
-                })
-                .collect()
+            let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
+                .render_pass(render_pass)
+                .attachments(&attachments)
+                .width(pass.output_textures[0].width)
+                .height(pass.output_textures[0].height)
+                .layers(1);
+
+            unsafe {
+                self.device
+                    .create_framebuffer(&framebuffer_create_info, None)
+                    .expect("Failed to create Framebuffer!")
+            }
         };
 
         // # Create graphics pipeline
@@ -272,7 +277,7 @@ impl<'a> GraphBuilder<'a> {
         Graph {
             device: self.device,
             render_pass,
-            framebuffers,
+            framebuffer,
             graphics_pipeline,
             pipeline_layout,
         }
