@@ -4,17 +4,14 @@ pub struct Facade {
     // Surface info. Changes with resolution.
     pub surface_caps: vk::SurfaceCapabilitiesKHR,
     pub surface_formats: Vec<vk::SurfaceFormatKHR>,
-    // - Swapchain
+    // Swapchain
     pub num_frames: usize,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_format: vk::Format,
-    pub swapchain_extent: vk::Extent2D,
-    pub _swapchain_images: Vec<vk::Image>,
-    pub swapchain_imageviews: Vec<vk::ImageView>,
-    pub depth_texture: Texture,
-    // - Synchronization primitives. these aren't really resolution-dependent
-    //   and could technically be moved outside the struct. They are kept here
-    //   because they're closely related to the rest of the members.
+    pub swapchain_textures: Vec<Texture>, // Color textures that are presented to the screen
+    pub depth_texture: Texture, // TODO: Move this to the user code, since there can be arbitrarily many depth buffers - shadowmaps, depth prepass, hi-z, etc.
+    // Synchronization primitives. These aren't really resolution-dependent
+    // and could technically be moved outside the struct. They are kept here
+    // because they're closely related to the rest of the members.
     pub image_available_semaphores: Vec<vk::Semaphore>,
     pub render_finished_semaphores: Vec<vk::Semaphore>,
     pub command_buffer_complete_fences: Vec<vk::Fence>,
@@ -158,6 +155,20 @@ impl Facade {
             imageviews
         };
 
+        let swapchain_textures = (0..num_frames)
+            .map(|i| {
+                Texture {
+                    width: swapchain_extent.width,
+                    height: swapchain_extent.height,
+                    format: swapchain_format,
+                    image: swapchain_images[i as usize],
+                    image_view: swapchain_imageviews[i as usize],
+                    opt_device_memory: None, // This memory is not allocated by us. It is part of the swapchain.
+                    device: gpu.device.clone(),
+                }
+            })
+            .collect();
+
         // # Create depth buffer
         let depth_texture = {
             let depth_format = vk::Format::D32_SFLOAT;
@@ -217,10 +228,7 @@ impl Facade {
             surface_formats,
             num_frames: num_frames as usize,
             swapchain,
-            swapchain_format,
-            swapchain_extent,
-            _swapchain_images: swapchain_images,
-            swapchain_imageviews,
+            swapchain_textures,
             depth_texture,
             image_available_semaphores,
             render_finished_semaphores,
@@ -238,9 +246,6 @@ impl Facade {
                     .destroy_semaphore(self.render_finished_semaphores[i], None);
                 gpu.device
                     .destroy_fence(self.command_buffer_complete_fences[i], None);
-            }
-            for &imageview in self.swapchain_imageviews.iter() {
-                gpu.device.destroy_image_view(imageview, None);
             }
 
             self.ext_swapchain.destroy_swapchain(self.swapchain, None);

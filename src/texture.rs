@@ -1,19 +1,23 @@
 use crate::*;
 
 pub struct Texture {
-    pub image: vk::Image,
+    pub width: u32,
+    pub height: u32,
     pub format: vk::Format,
-    pub device_memory: vk::DeviceMemory,
+    pub image: vk::Image,
     pub image_view: vk::ImageView,
-    device: ash::Device,
+    pub opt_device_memory: Option<vk::DeviceMemory>, // None if we didn't manually allocate memory, e.g. in the case of swapchain images
+    pub device: ash::Device,
 }
 
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_image_view(self.image_view, None);
-            self.device.destroy_image(self.image, None);
-            self.device.free_memory(self.device_memory, None);
+            if let Some(mem) = self.opt_device_memory {
+                self.device.destroy_image(self.image, None); // Only destroy the image if we allocated it in the first place
+                self.device.free_memory(mem, None);
+            }
         }
     }
 }
@@ -99,10 +103,12 @@ impl Texture {
         };
 
         Texture {
-            image,
             format,
-            device_memory,
+            width,
+            height,
+            image,
             image_view,
+            opt_device_memory: Some(device_memory),
             device,
         }
     }

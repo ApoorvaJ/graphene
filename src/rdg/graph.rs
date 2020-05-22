@@ -57,12 +57,17 @@ impl Graph {
             },
         ];
 
+        let extent = vk::Extent2D {
+            width: facade.swapchain_textures[0].width,
+            height: facade.swapchain_textures[0].height,
+        };
+
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(self.render_pass)
             .framebuffer(self.framebuffers[idx])
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
-                extent: facade.swapchain_extent,
+                extent,
             })
             .clear_values(&clear_values);
 
@@ -83,8 +88,8 @@ impl Graph {
                 let viewports = [vk::Viewport {
                     x: 0.0,
                     y: 0.0,
-                    width: facade.swapchain_extent.width as f32,
-                    height: facade.swapchain_extent.height as f32,
+                    width: facade.swapchain_textures[0].width as f32,
+                    height: facade.swapchain_textures[0].height as f32,
                     min_depth: 0.0,
                     max_depth: 1.0,
                 }];
@@ -92,7 +97,7 @@ impl Graph {
 
                 let scissors = [vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: facade.swapchain_extent,
+                    extent,
                 }];
                 self.device.cmd_set_scissor(command_buffer, 0, &scissors);
             }

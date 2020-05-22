@@ -517,8 +517,8 @@ impl Context {
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(physical_size) => {
-                        if self.facade.swapchain_extent.width != physical_size.width
-                            || self.facade.swapchain_extent.height != physical_size.height
+                        if self.facade.swapchain_textures[0].width != physical_size.width
+                            || self.facade.swapchain_textures[0].height != physical_size.height
                         {
                             self.recreate_resolution_dependent_state();
                         }

@@ -27,7 +27,7 @@ impl GraphBuilder {
             let attachments = vec![
                 // Color attachment
                 vk::AttachmentDescription {
-                    format: facade.swapchain_format,
+                    format: facade.swapchain_textures[0].format,
                     flags: vk::AttachmentDescriptionFlags::empty(),
                     samples: vk::SampleCountFlags::TYPE_1,
                     load_op: vk::AttachmentLoadOp::CLEAR,
@@ -82,16 +82,19 @@ impl GraphBuilder {
         // # Create framebuffers
         let framebuffers: Vec<vk::Framebuffer> = {
             facade
-                .swapchain_imageviews
+                .swapchain_textures
                 .iter()
-                .map(|&imageview| {
-                    let attachments = [imageview, facade.depth_texture.image_view];
+                .map(|swapchain_texture| {
+                    let attachments = [
+                        swapchain_texture.image_view,
+                        facade.depth_texture.image_view,
+                    ];
 
                     let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
                         .render_pass(render_pass)
                         .attachments(&attachments)
-                        .width(facade.swapchain_extent.width)
-                        .height(facade.swapchain_extent.height)
+                        .width(swapchain_texture.width)
+                        .height(swapchain_texture.height)
                         .layers(1);
 
                     unsafe {

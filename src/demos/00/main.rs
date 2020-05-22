@@ -23,10 +23,11 @@ fn main() {
         let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
             * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
         let mtx_view_to_clip = {
-            let extent = &ctx.facade.swapchain_extent;
+            let width = ctx.facade.swapchain_textures[0].width;
+            let height = ctx.facade.swapchain_textures[0].height;
             Mat4::perspective_lh(
                 60.0 * DEGREES_TO_RADIANS,
-                extent.width as f32 / extent.height as f32,
+                width as f32 / height as f32,
                 0.01,
                 100.0,
             )
