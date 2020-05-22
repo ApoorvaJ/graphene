@@ -1,11 +1,16 @@
 use crate::*;
 
+pub struct BakedPass {
+    pub clear_values: Vec<vk::ClearValue>,
+}
+
 pub struct Graph {
     pub device: ash::Device,
     pub render_pass: vk::RenderPass,
     pub framebuffer: vk::Framebuffer,
     pub pipeline_layout: vk::PipelineLayout,
     pub graphics_pipeline: vk::Pipeline,
+    pub baked_passes: Vec<BakedPass>,
 }
 
 impl Drop for Graph {
@@ -39,23 +44,6 @@ impl Graph {
                 .expect("Failed to begin recording command buffer.");
         }
 
-        let clear_values = [
-            // TODO: Derive clear behavior from graph
-            vk::ClearValue {
-                // Clear value for depth buffer
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            },
-            vk::ClearValue {
-                // Clear value for color buffer
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            },
-        ];
-
         let extent = vk::Extent2D {
             width: facade.swapchain_textures[0].width,
             height: facade.swapchain_textures[0].height,
@@ -68,7 +56,7 @@ impl Graph {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent,
             })
-            .clear_values(&clear_values);
+            .clear_values(&self.baked_passes[0].clear_values);
 
         unsafe {
             self.device.cmd_begin_render_pass(

@@ -128,6 +128,31 @@ impl<'a> GraphBuilder<'a> {
             }
         };
 
+        // Bake passes
+        let baked_passes = {
+            let mut clear_values = Vec::new();
+            // Clear value for depth buffer
+            if pass.opt_output_depth.is_some() {
+                clear_values.push(vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                });
+            }
+            // Clear values for color buffer
+            for _ in &pass.outputs_color {
+                clear_values.push(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                })
+            }
+
+            let baked_passes = vec![BakedPass { clear_values }];
+            baked_passes
+        };
+
         // # Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
             let main_function_name = CString::new("main").unwrap();
@@ -294,6 +319,7 @@ impl<'a> GraphBuilder<'a> {
             framebuffer,
             graphics_pipeline,
             pipeline_layout,
+            baked_passes,
         }
     }
 }
