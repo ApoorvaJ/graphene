@@ -26,7 +26,7 @@ pub struct Context {
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 
     pub command_buffers: Vec<vk::CommandBuffer>,
-    pub render_graph: RenderGraph,
+    pub graph: Graph,
     pub facade: Facade, // Resolution-dependent apparatus
     pub gpu: Gpu,
     pub basis: Basis,
@@ -74,10 +74,10 @@ fn create_render_graph(
     command_buffers: &Vec<vk::CommandBuffer>,
     mesh: &Mesh,
     descriptor_sets: &Vec<vk::DescriptorSet>,
-) -> RenderGraph {
-    let render_graph = RenderGraphBuilder::new(gpu)
+) -> Graph {
+    let graph = GraphBuilder::new(gpu)
         .add_pass(
-            RenderPass::new("gbuffer")
+            Pass::new("gbuffer")
                 .with_output_texture("emissive")
                 .with_output_texture("pbr"),
         )
@@ -88,9 +88,9 @@ fn create_render_graph(
                 .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
                 .unwrap();
         }
-        render_graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, facade, i);
+        graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, facade, i);
     }
-    render_graph
+    graph
 }
 
 impl Context {
@@ -103,7 +103,7 @@ impl Context {
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
-        self.render_graph = create_render_graph(
+        self.graph = create_render_graph(
             &self.gpu,
             &self.facade,
             &self.shader_modules,
@@ -242,11 +242,9 @@ impl Context {
 
         // # Create descriptor sets
         let descriptor_sets = {
-            // TODO: Convert to collect pattern
-            let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-            for _ in 0..facade.num_frames {
-                layouts.push(uniform_buffer_layout);
-            }
+            let layouts: Vec<vk::DescriptorSetLayout> = (0..facade.num_frames)
+                .map(|_| uniform_buffer_layout)
+                .collect();
 
             let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
                 .descriptor_pool(descriptor_pool)
@@ -320,7 +318,7 @@ impl Context {
 
         // Create render graph
         // TODO: Move this to main.rs
-        let render_graph = create_render_graph(
+        let graph = create_render_graph(
             &gpu,
             &facade,
             &shader_modules,
@@ -363,7 +361,7 @@ impl Context {
             watch_rx,
 
             command_buffers,
-            render_graph,
+            graph,
             facade,
             gpu,
             basis,
@@ -489,7 +487,7 @@ impl Context {
 
                         if num_changed > 0 {
                             // TODO: Delete this. Do this every frame instead.
-                            self.render_graph = create_render_graph(
+                            self.graph = create_render_graph(
                                 &self.gpu,
                                 &self.facade,
                                 &self.shader_modules,

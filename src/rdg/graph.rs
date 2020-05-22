@@ -1,6 +1,6 @@
 use crate::*;
 
-pub struct RenderGraph {
+pub struct Graph {
     pub device: ash::Device,
     pub render_pass: vk::RenderPass,
     pub framebuffers: Vec<vk::Framebuffer>,
@@ -8,7 +8,7 @@ pub struct RenderGraph {
     pub graphics_pipeline: vk::Pipeline,
 }
 
-impl Drop for RenderGraph {
+impl Drop for Graph {
     fn drop(&mut self) {
         unsafe {
             self.device
@@ -22,7 +22,7 @@ impl Drop for RenderGraph {
     }
 }
 
-impl RenderGraph {
+impl Graph {
     pub fn record_command_buffer(
         &self,
         //TODO: Remove these params

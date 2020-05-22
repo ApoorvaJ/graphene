@@ -1,17 +1,17 @@
 use crate::*;
 
-pub struct RenderGraphBuilder {
+pub struct GraphBuilder {
     device: ash::Device,
 }
 
-impl RenderGraphBuilder {
-    pub fn new(gpu: &Gpu) -> RenderGraphBuilder {
-        RenderGraphBuilder {
+impl GraphBuilder {
+    pub fn new(gpu: &Gpu) -> GraphBuilder {
+        GraphBuilder {
             device: gpu.device.clone(),
         }
     }
 
-    pub fn add_pass(self, _render_pass: RenderPass) -> RenderGraphBuilder {
+    pub fn add_pass(self, _render_pass: Pass) -> GraphBuilder {
         self
     }
 
@@ -21,7 +21,7 @@ impl RenderGraphBuilder {
         facade: &Facade,
         shader_modules: &Vec<vk::ShaderModule>,
         uniform_buffer_layout: vk::DescriptorSetLayout,
-    ) -> RenderGraph {
+    ) -> Graph {
         // # Create render pass
         let render_pass = {
             let attachments = vec![
@@ -263,7 +263,7 @@ impl RenderGraphBuilder {
             (graphics_pipelines[0], pipeline_layout)
         };
 
-        RenderGraph {
+        Graph {
             device: self.device,
             render_pass,
             framebuffers,
