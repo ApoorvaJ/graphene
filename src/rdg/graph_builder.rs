@@ -33,16 +33,17 @@ impl<'a> GraphBuilder<'a> {
                 .iter()
                 .enumerate()
                 .map(|(idx, tex)| {
-                    // TODO: Embed this into texture params
-                    let store_op = if idx == 0 {
+                    // TODO: Derive load and store ops from graph
+                    let store_op = if idx == 1 {
                         vk::AttachmentStoreOp::STORE
                     } else {
                         vk::AttachmentStoreOp::DONT_CARE
                     };
-                    let final_layout = if idx == 0 {
+                    // TODO: Embed this into texture params
+                    let final_layout = if idx == 1 {
                         vk::ImageLayout::PRESENT_SRC_KHR
                     } else {
-                        vk::ImageLayout::PRESENT_SRC_KHR
+                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                     };
                     //
                     vk::AttachmentDescription {
@@ -59,14 +60,14 @@ impl<'a> GraphBuilder<'a> {
                 })
                 .collect();
 
-            let color_attachment_ref = [vk::AttachmentReference {
-                attachment: 0,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }];
             let depth_attachment_ref = vk::AttachmentReference {
-                attachment: 1,
+                attachment: 0,
                 layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             };
+            let color_attachment_ref = [vk::AttachmentReference {
+                attachment: 1,
+                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            }];
 
             let subpasses = [vk::SubpassDescription {
                 pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,

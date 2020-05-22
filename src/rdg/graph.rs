@@ -40,17 +40,18 @@ impl Graph {
         }
 
         let clear_values = [
-            vk::ClearValue {
-                // Clear value for color buffer
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            },
+            // TODO: Derive load and store ops from graph
             vk::ClearValue {
                 // Clear value for depth buffer
                 depth_stencil: vk::ClearDepthStencilValue {
                     depth: 1.0,
                     stencil: 0,
+                },
+            },
+            vk::ClearValue {
+                // Clear value for color buffer
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
                 },
             },
         ];

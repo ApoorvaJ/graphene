@@ -79,9 +79,9 @@ fn create_render_graph(
         .map(|i| {
             let graph = GraphBuilder::new(gpu)
                 .add_pass(
-                    Pass::new("gbuffer")
-                        .with_output_texture(&facade.swapchain_textures[i])
-                        .with_output_texture(&facade.depth_texture),
+                    Pass::new("forward lit")
+                        .with_output_texture(&facade.depth_texture)
+                        .with_output_texture(&facade.swapchain_textures[i]),
                 )
                 .build(shader_modules, uniform_buffer_layout);
 
