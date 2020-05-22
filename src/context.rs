@@ -26,7 +26,7 @@ pub struct Context {
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 
     pub command_buffers: Vec<vk::CommandBuffer>,
-    pub graph: Graph,
+    pub graphs: Vec<Graph>,
     pub facade: Facade, // Resolution-dependent apparatus
     pub gpu: Gpu,
     pub basis: Basis,
@@ -74,23 +74,29 @@ fn create_render_graph(
     command_buffers: &Vec<vk::CommandBuffer>,
     mesh: &Mesh,
     descriptor_sets: &Vec<vk::DescriptorSet>,
-) -> Graph {
-    let graph = GraphBuilder::new(gpu)
-        .add_pass(
-            Pass::new("gbuffer")
-                .with_output_texture("emissive")
-                .with_output_texture("pbr"),
-        )
-        .build(facade, shader_modules, uniform_buffer_layout);
-    for i in 0..command_buffers.len() {
-        unsafe {
-            gpu.device
-                .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
-                .unwrap();
-        }
-        graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, facade, i);
-    }
-    graph
+) -> Vec<Graph> {
+    let graphs = (0..command_buffers.len())
+        .map(|i| {
+            let graph = GraphBuilder::new(gpu)
+                .add_pass(
+                    Pass::new("gbuffer")
+                        .with_output_texture(&facade.swapchain_textures[i])
+                        .with_output_texture(&facade.depth_texture),
+                )
+                .build(facade, shader_modules, uniform_buffer_layout);
+
+            unsafe {
+                gpu.device
+                    .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
+                    .unwrap();
+            }
+            graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, facade, i);
+
+            graph
+        })
+        .collect();
+
+    graphs
 }
 
 impl Context {
@@ -103,7 +109,7 @@ impl Context {
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
-        self.graph = create_render_graph(
+        self.graphs = create_render_graph(
             &self.gpu,
             &self.facade,
             &self.shader_modules,
@@ -318,7 +324,7 @@ impl Context {
 
         // Create render graph
         // TODO: Move this to main.rs
-        let graph = create_render_graph(
+        let graphs = create_render_graph(
             &gpu,
             &facade,
             &shader_modules,
@@ -361,7 +367,7 @@ impl Context {
             watch_rx,
 
             command_buffers,
-            graph,
+            graphs,
             facade,
             gpu,
             basis,
@@ -487,7 +493,7 @@ impl Context {
 
                         if num_changed > 0 {
                             // TODO: Delete this. Do this every frame instead.
-                            self.graph = create_render_graph(
+                            self.graphs = create_render_graph(
                                 &self.gpu,
                                 &self.facade,
                                 &self.shader_modules,

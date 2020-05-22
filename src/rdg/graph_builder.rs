@@ -1,17 +1,20 @@
 use crate::*;
 
-pub struct GraphBuilder {
+pub struct GraphBuilder<'a> {
     device: ash::Device,
+    passes: Vec<Pass<'a>>,
 }
 
-impl GraphBuilder {
+impl<'a> GraphBuilder<'a> {
     pub fn new(gpu: &Gpu) -> GraphBuilder {
         GraphBuilder {
             device: gpu.device.clone(),
+            passes: Vec::new(),
         }
     }
 
-    pub fn add_pass(self, _render_pass: Pass) -> GraphBuilder {
+    pub fn add_pass(mut self, pass: Pass<'a>) -> GraphBuilder<'a> {
+        self.passes.push(pass);
         self
     }
 

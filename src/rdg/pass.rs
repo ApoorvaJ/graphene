@@ -1,11 +1,11 @@
-// use crate::*;
+use crate::*;
 
-pub struct Pass {
+pub struct Pass<'a> {
     _name: String,
-    output_textures: Vec<String>,
+    output_textures: Vec<&'a Texture>, // The textures must live at least as long as the pass
 }
 
-impl Pass {
+impl<'a> Pass<'a> {
     pub fn new(name: &str) -> Pass {
         Pass {
             _name: String::from(name),
@@ -13,8 +13,8 @@ impl Pass {
         }
     }
 
-    pub fn with_output_texture(mut self, texture_name: &str) -> Pass {
-        self.output_textures.push(String::from(texture_name));
+    pub fn with_output_texture(mut self, texture: &'a Texture) -> Pass {
+        self.output_textures.push(texture);
         self
     }
 }
