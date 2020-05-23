@@ -1,6 +1,6 @@
 use crate::*;
 
-pub struct BakedPass {
+pub struct BuiltPass {
     pub clear_values: Vec<vk::ClearValue>,
     pub viewport_width: u32,
     pub viewport_height: u32,
@@ -12,7 +12,7 @@ pub struct Graph {
     pub framebuffer: vk::Framebuffer,
     pub pipeline_layout: vk::PipelineLayout,
     pub graphics_pipeline: vk::Pipeline,
-    pub baked_passes: Vec<BakedPass>,
+    pub baked_passes: Vec<BuiltPass>,
 }
 
 impl Drop for Graph {

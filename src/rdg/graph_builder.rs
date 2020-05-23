@@ -151,7 +151,7 @@ impl<'a> GraphBuilder<'a> {
                 })
             }
 
-            let baked_passes = vec![BakedPass {
+            let baked_passes = vec![BuiltPass {
                 clear_values,
                 viewport_width,
                 viewport_height,
