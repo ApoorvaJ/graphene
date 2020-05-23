@@ -2,6 +2,8 @@ use crate::*;
 
 pub struct BakedPass {
     pub clear_values: Vec<vk::ClearValue>,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
 }
 
 pub struct Graph {
@@ -32,9 +34,9 @@ impl Graph {
         command_buffer: vk::CommandBuffer,
         mesh: &Mesh,
         descriptor_sets: &[vk::DescriptorSet],
-        facade: &Facade,
         idx: usize,
     ) {
+        let baked_pass = &self.baked_passes[0];
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
@@ -45,8 +47,8 @@ impl Graph {
         }
 
         let extent = vk::Extent2D {
-            width: facade.swapchain_textures[0].width,
-            height: facade.swapchain_textures[0].height,
+            width: baked_pass.viewport_width,
+            height: baked_pass.viewport_height,
         };
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
@@ -56,7 +58,7 @@ impl Graph {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent,
             })
-            .clear_values(&self.baked_passes[0].clear_values);
+            .clear_values(&baked_pass.clear_values);
 
         unsafe {
             self.device.cmd_begin_render_pass(
@@ -75,8 +77,8 @@ impl Graph {
                 let viewports = [vk::Viewport {
                     x: 0.0,
                     y: 0.0,
-                    width: facade.swapchain_textures[0].width as f32,
-                    height: facade.swapchain_textures[0].height as f32,
+                    width: baked_pass.viewport_width as f32,
+                    height: baked_pass.viewport_height as f32,
                     min_depth: 0.0,
                     max_depth: 1.0,
                 }];

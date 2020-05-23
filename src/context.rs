@@ -90,7 +90,7 @@ fn create_render_graph(
                     .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
                     .unwrap();
             }
-            graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, facade, i);
+            graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, i);
 
             graph
         })

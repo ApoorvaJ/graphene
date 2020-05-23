@@ -94,17 +94,19 @@ impl<'a> GraphBuilder<'a> {
             }
         };
 
+        // Get viewport width and height
+        let (viewport_width, viewport_height) = if let Some(depth_tex) = pass.opt_output_depth {
+            (depth_tex.width, depth_tex.height)
+        } else {
+            assert!(
+                pass.outputs_color.len() > 0,
+                "At least a depth texture or a single color texture needs to be bound."
+            );
+            (pass.outputs_color[0].width, pass.outputs_color[0].height)
+        };
+
         // # Create framebuffer
         let framebuffer: vk::Framebuffer = {
-            let (w, h) = if let Some(depth_tex) = pass.opt_output_depth {
-                (depth_tex.width, depth_tex.height)
-            } else {
-                assert!(
-                    pass.outputs_color.len() > 0,
-                    "At least a depth texture or a single color texture needs to be bound."
-                );
-                (pass.outputs_color[0].width, pass.outputs_color[0].height)
-            };
             // TODO: Assert that color and depth textures have the same resolution
             let mut attachments: Vec<vk::ImageView> = Vec::new();
             if let Some(depth_tex) = pass.opt_output_depth {
@@ -117,8 +119,8 @@ impl<'a> GraphBuilder<'a> {
             let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
                 .attachments(&attachments)
-                .width(w)
-                .height(h)
+                .width(viewport_width)
+                .height(viewport_height)
                 .layers(1);
 
             unsafe {
@@ -149,7 +151,11 @@ impl<'a> GraphBuilder<'a> {
                 })
             }
 
-            let baked_passes = vec![BakedPass { clear_values }];
+            let baked_passes = vec![BakedPass {
+                clear_values,
+                viewport_width,
+                viewport_height,
+            }];
             baked_passes
         };
 
