@@ -81,7 +81,10 @@ fn create_render_graph(
                 .add_pass(
                     Pass::new("forward lit")
                         .with_output_depth(&facade.depth_texture)
-                        .with_output_color(&facade.swapchain_textures[i]),
+                        .with_output_color(&facade.swapchain_textures[i])
+                        .with_lambda(|_command_buffer: vk::CommandBuffer| {
+                            println!("Forward lit lambda")
+                        }),
                 )
                 .build(shader_modules, uniform_buffer_layout);
 

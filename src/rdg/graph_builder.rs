@@ -155,6 +155,7 @@ impl<'a> GraphBuilder<'a> {
                 clear_values,
                 viewport_width,
                 viewport_height,
+                opt_lambda: pass.opt_lambda,
             }];
             baked_passes
         };

@@ -4,6 +4,7 @@ pub struct BuiltPass {
     pub clear_values: Vec<vk::ClearValue>,
     pub viewport_width: u32,
     pub viewport_height: u32,
+    pub opt_lambda: Option<fn(vk::CommandBuffer)>, // TODO: Investigate async/await
 }
 
 pub struct Graph {
@@ -115,6 +116,10 @@ impl Graph {
                     &sets,
                     &[],
                 );
+            }
+
+            if let Some(lambda) = baked_pass.opt_lambda {
+                lambda(command_buffer);
             }
 
             self.device.cmd_draw_indexed(
