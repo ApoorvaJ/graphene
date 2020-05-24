@@ -19,12 +19,12 @@ impl<'a> GraphBuilder<'a> {
     }
 
     pub fn build(
-        self,
+        mut self, // TODO: eliminate this mut
         // TODO: Remove these params
         shader_modules: &Vec<vk::ShaderModule>,
         uniform_buffer_layout: vk::DescriptorSetLayout,
     ) -> Graph {
-        let pass = &self.passes[0];
+        let pass = &mut self.passes[0];
 
         // # Create render pass
         let render_pass = {
@@ -151,11 +151,14 @@ impl<'a> GraphBuilder<'a> {
                 })
             }
 
+            let mut lambda: Box<dyn FnMut(vk::CommandBuffer)> = Box::new(|_| {});
+            std::mem::swap(&mut lambda, &mut pass.lambda);
+
             let baked_passes = vec![BuiltPass {
                 clear_values,
                 viewport_width,
                 viewport_height,
-                opt_lambda: pass.opt_lambda,
+                lambda,
             }];
             baked_passes
         };

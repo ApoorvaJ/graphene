@@ -13,9 +13,11 @@ struct UniformBuffer {
 
 fn main() {
     let ctx = graphene::Context::new(std::mem::size_of::<UniformBuffer>());
+    let mut foo = 1;
     // TODO: Set up pipeline and upload assets here
 
     ctx.run_loop(move |ctx, elapsed_seconds, frame_idx| {
+        foo += 1;
         // Update uniform buffer
         let mtx_model_to_world =
             Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)

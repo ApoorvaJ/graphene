@@ -4,7 +4,7 @@ pub struct BuiltPass {
     pub clear_values: Vec<vk::ClearValue>,
     pub viewport_width: u32,
     pub viewport_height: u32,
-    pub opt_lambda: Option<fn(vk::CommandBuffer)>, // TODO: Investigate async/await
+    pub lambda: Box<dyn FnMut(vk::CommandBuffer)>, // TODO: Investigate async/await
 }
 
 pub struct Graph {
@@ -30,14 +30,14 @@ impl Drop for Graph {
 
 impl Graph {
     pub fn record_command_buffer(
-        &self,
+        &mut self,
         //TODO: Remove these params
         command_buffer: vk::CommandBuffer,
         mesh: &Mesh,
         descriptor_sets: &[vk::DescriptorSet],
         idx: usize,
     ) {
-        let baked_pass = &self.baked_passes[0];
+        let baked_pass = &mut self.baked_passes[0];
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
 
@@ -118,9 +118,7 @@ impl Graph {
                 );
             }
 
-            if let Some(lambda) = baked_pass.opt_lambda {
-                lambda(command_buffer);
-            }
+            (baked_pass.lambda)(command_buffer);
 
             self.device.cmd_draw_indexed(
                 command_buffer,
