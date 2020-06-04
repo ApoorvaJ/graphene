@@ -1,4 +1,19 @@
-/* Questions:
+/*
+Goals:
+
+    1. Implement a simple render graph API
+    2. No lambdas, because lambdas come with unavoidably complex lifetimes
+    3. No async/await.
+       Pros:
+           Both, async/await and render graphs involve composing a DAG and then
+           kicking it off.
+       Cons:
+           Too abstracted away. I think the level of superstition involved is
+           not worth the mild syntactic sugar.
+    4. No reordering of passes
+    5. No profile-guided optimization ambitions
+
+Questions:
 
     1. What happens if a declared pass is never executed?
     A: Nothing? :P
@@ -18,6 +33,13 @@
        executed?
     A: This is invalid behavior. We make it impossible by making the
        graph_builder and the graph two distinct types.
+
+TODOs:
+
+    1. graph.end_pass() followed by the next graph.begin_pass(), could be
+       conflated into a single call. I currently don't think that this has any
+       perf implications. I think that keeping the begin/end_pass() calls
+       separate is more meaningful semantically. More investigation needed.
 */
 
 /* Step 1: Declaration */
