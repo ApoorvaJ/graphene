@@ -1,0 +1,51 @@
+/* Questions:
+
+    1. What happens if a declared pass is never executed?
+    A: Nothing? :P
+       This might lead to bad graph execution, since state transitions will be
+       encoded, because the declaration exists. It might be worth throwing a
+       warning during the graph's drop.
+
+    2. What happens if order of declaration differs from order of execution?
+    A: We validate the pass handle provided to graph.begin_pass(), and check
+       whether it agrees with the declaration order. We can also use this to
+       solve problem 1.
+       To begin with, a graph can just maintain a simple queue of pass hashes,
+       and dequeue them as passes are executed. Later, async compute will need
+       more sophisticated tracking on this front.
+
+    3. What happens if the user tries to add_pass after a begin_pass has been
+       executed?
+    A: This is invalid behavior. We make it impossible by making the
+       graph_builder and the graph two distinct types.
+*/
+
+/* Step 1: Declaration */
+let mut graph_builder = GraphBuilder::new(gpu);
+// Here, add_pass() returns a hash based on the passed inputs
+let pass_0 = graph_builder.add_pass(
+    "gbuffer",
+    vec![], // inputs
+    vec![gbuffer_a, // outputs
+    gbuffer_b, gbuffer_c],
+    Some(depth)
+);
+let pass_1 = graph_builder.add_pass(
+    "lighting",
+    vec![gbuffer_a, gbuffer_b, gbuffer_c], // inputs
+    vec![scene_color], // outputs
+    None
+);
+
+/* Step 2: Building */
+let graph = graph_builder.build();
+
+/* Step 3: Execution */
+graph.begin_pass(pass_0, cmd_buf);
+device.cmd_draw_indexed(cmd_buf, mesh_0...);
+device.cmd_draw_indexed(cmd_buf, mesh_1...);
+graph.end_pass(cmd_buf);
+
+graph.begin_pass(pass_1, cmd_buf);
+device.cmd_draw_full_screen_triangle(cmd_buf, ...);
+graph.end_pass(cmd_buf);
