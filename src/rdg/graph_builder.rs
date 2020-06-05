@@ -7,6 +7,7 @@ pub struct Pass {
     pub opt_depth: Option<(vk::ImageView, vk::Format)>,
     pub viewport_width: u32,
     pub viewport_height: u32,
+    pub shader_modules: Vec<vk::ShaderModule>,
     pub buffer_info: (vk::Buffer, u64), // (vk_buffer, size)
 }
 
@@ -30,7 +31,7 @@ impl GraphBuilder {
         name: &str,
         output_texs: &Vec<&Texture>,
         opt_depth_tex: Option<&Texture>,
-        // TODO: Remove these params
+        shader_modules: &Vec<vk::ShaderModule>,
         buffer: &HostVisibleBuffer,
         environment_texture: &Texture,
         environment_sampler: vk::Sampler,
@@ -43,6 +44,10 @@ impl GraphBuilder {
         let opt_depth = opt_depth_tex.map(|depth_tex| (depth_tex.image_view, depth_tex.format));
         let viewport_width = output_texs[0].width;
         let viewport_height = output_texs[0].height;
+        let shader_modules = shader_modules
+            .iter()
+            .map(|shader_module| *shader_module)
+            .collect();
 
         self.passes.push(Pass {
             name: String::from(name),
@@ -52,6 +57,7 @@ impl GraphBuilder {
             viewport_width,
             viewport_height,
             buffer_info: (buffer.vk_buffer, buffer.size),
+            shader_modules,
         });
 
         let pass_handle = self.next_pass_handle;

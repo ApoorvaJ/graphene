@@ -71,12 +71,13 @@ fn create_render_graph(
                 "forward lit",
                 &vec![&facade.swapchain_textures[i]],
                 Some(&facade.depth_texture),
+                shader_modules,
                 &uniform_buffers[i],
                 &environment_texture,
                 environment_sampler,
             );
 
-            let graph = Graph::new(graph_builder, shader_modules);
+            let graph = Graph::new(graph_builder);
 
             unsafe {
                 gpu.device

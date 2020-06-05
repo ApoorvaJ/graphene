@@ -36,11 +36,7 @@ impl Drop for Graph {
 }
 
 impl Graph {
-    pub fn new(
-        graph_builder: GraphBuilder,
-        // TODO: Remove these params
-        shader_modules: &Vec<vk::ShaderModule>,
-    ) -> Graph {
+    pub fn new(graph_builder: GraphBuilder) -> Graph {
         let device = graph_builder.device;
         let pass = &graph_builder.passes[0];
 
@@ -276,13 +272,13 @@ impl Graph {
             let shader_stages = [
                 vk::PipelineShaderStageCreateInfo {
                     stage: vk::ShaderStageFlags::VERTEX,
-                    module: shader_modules[0],
+                    module: pass.shader_modules[0],
                     p_name: main_function_name.as_ptr(),
                     ..Default::default()
                 },
                 vk::PipelineShaderStageCreateInfo {
                     stage: vk::ShaderStageFlags::FRAGMENT,
-                    module: shader_modules[1],
+                    module: pass.shader_modules[1],
                     p_name: main_function_name.as_ptr(),
                     ..Default::default()
                 },
