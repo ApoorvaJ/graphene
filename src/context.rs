@@ -1,7 +1,6 @@
 use crate::*;
 
 use glam::*;
-use std::ptr;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -12,7 +11,6 @@ pub struct Context {
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
     pub mesh: Mesh,
-    pub uniform_buffer_layout: vk::DescriptorSetLayout,
     pub uniform_buffers: Vec<HostVisibleBuffer>,
     pub environment_texture: Texture,
     pub environment_sampler: vk::Sampler,
@@ -43,11 +41,6 @@ impl Drop for Context {
 
             self.facade.destroy(&self.gpu);
 
-            // Uniform buffer
-            self.gpu
-                .device
-                .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
-
             self.gpu
                 .device
                 .destroy_sampler(self.environment_sampler, None);
@@ -65,7 +58,6 @@ fn create_render_graph(
     gpu: &Gpu,
     facade: &Facade,
     shader_modules: &Vec<vk::ShaderModule>,
-    uniform_buffer_layout: vk::DescriptorSetLayout,
     command_buffers: &Vec<vk::CommandBuffer>,
     mesh: &Mesh,
     uniform_buffers: &Vec<HostVisibleBuffer>,
@@ -84,7 +76,7 @@ fn create_render_graph(
                 environment_sampler,
             );
 
-            let graph = Graph::new(graph_builder, shader_modules, uniform_buffer_layout);
+            let graph = Graph::new(graph_builder, shader_modules);
 
             unsafe {
                 gpu.device
@@ -144,7 +136,6 @@ impl Context {
             &self.gpu,
             &self.facade,
             &self.shader_modules,
-            self.uniform_buffer_layout,
             &self.command_buffers,
             &self.mesh,
             &self.uniform_buffers,
@@ -187,35 +178,6 @@ impl Context {
 
         // TODO: Move this up?
         let facade = Facade::new(&basis, &gpu, &window);
-
-        // # Uniform buffer descriptor layout
-        let uniform_buffer_layout = {
-            let bindings = [
-                vk::DescriptorSetLayoutBinding {
-                    binding: 0,
-                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: 1,
-                    stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                    p_immutable_samplers: ptr::null(),
-                },
-                vk::DescriptorSetLayoutBinding {
-                    binding: 1,
-                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    descriptor_count: 1,
-                    stage_flags: vk::ShaderStageFlags::FRAGMENT,
-                    p_immutable_samplers: ptr::null(),
-                },
-            ];
-
-            let ubo_layout_create_info =
-                vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
-
-            unsafe {
-                gpu.device
-                    .create_descriptor_set_layout(&ubo_layout_create_info, None)
-                    .expect("Failed to create Descriptor Set Layout!")
-            }
-        };
 
         // # Create the uniform buffer
         let uniform_buffers: Vec<HostVisibleBuffer> = (0..facade.num_frames)
@@ -278,7 +240,6 @@ impl Context {
             &gpu,
             &facade,
             &shader_modules,
-            uniform_buffer_layout,
             &command_buffers,
             &mesh,
             &uniform_buffers,
@@ -305,7 +266,6 @@ impl Context {
             shader_modules,
             command_pool,
             mesh,
-            uniform_buffer_layout,
             uniform_buffers,
             environment_texture,
             environment_sampler,
@@ -447,7 +407,6 @@ impl Context {
                                 &self.gpu,
                                 &self.facade,
                                 &self.shader_modules,
-                                self.uniform_buffer_layout,
                                 &self.command_buffers,
                                 &self.mesh,
                                 &self.uniform_buffers,

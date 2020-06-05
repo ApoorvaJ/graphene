@@ -35,6 +35,7 @@ impl GraphBuilder {
         environment_texture: &Texture,
         environment_sampler: vk::Sampler,
     ) -> u64 {
+        // TODO: Assert that color and depth textures have the same resolution
         let outputs = output_texs
             .iter()
             .map(|tex| (tex.image_view, tex.format))

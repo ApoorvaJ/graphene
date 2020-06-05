@@ -2,6 +2,7 @@ use crate::*;
 
 pub struct BuiltPass {
     pub clear_values: Vec<vk::ClearValue>,
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_set: vk::DescriptorSet,
 }
 
@@ -20,9 +21,8 @@ impl Drop for Graph {
     fn drop(&mut self) {
         unsafe {
             for built_pass in &mut self.built_passes {
-                let sets = [built_pass.descriptor_set];
                 self.device
-                    .free_descriptor_sets(self.descriptor_pool, &sets);
+                    .destroy_descriptor_set_layout(built_pass.descriptor_set_layout, None);
             }
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
@@ -40,7 +40,6 @@ impl Graph {
         graph_builder: GraphBuilder,
         // TODO: Remove these params
         shader_modules: &Vec<vk::ShaderModule>,
-        uniform_buffer_layout: vk::DescriptorSetLayout,
     ) -> Graph {
         let device = graph_builder.device;
         let pass = &graph_builder.passes[0];
@@ -115,7 +114,6 @@ impl Graph {
 
         // # Create framebuffer
         let framebuffer: vk::Framebuffer = {
-            // TODO: Assert that color and depth textures have the same resolution
             let mut attachments: Vec<vk::ImageView> = Vec::new();
             if let Some((depth_image_view, _depth_format)) = pass.opt_depth {
                 attachments.push(depth_image_view);
@@ -152,7 +150,6 @@ impl Graph {
             ];
 
             let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
-                .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
                 .max_sets(1) // TODO: Derive this number
                 .pool_sizes(&pool_sizes);
 
@@ -184,8 +181,38 @@ impl Graph {
                 })
             }
 
+            // Descriptor set layout
+            let descriptor_set_layout = {
+                let bindings = [
+                    vk::DescriptorSetLayoutBinding {
+                        binding: 0,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        descriptor_count: 1,
+                        stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                        p_immutable_samplers: ptr::null(),
+                    },
+                    vk::DescriptorSetLayoutBinding {
+                        binding: 1,
+                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        descriptor_count: 1,
+                        stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                        p_immutable_samplers: ptr::null(),
+                    },
+                ];
+
+                let ubo_layout_create_info =
+                    vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
+
+                unsafe {
+                    device
+                        .create_descriptor_set_layout(&ubo_layout_create_info, None)
+                        .expect("Failed to create Descriptor Set Layout!")
+                }
+            };
+
+            // Descriptor set
             let descriptor_set = {
-                let layouts = [uniform_buffer_layout];
+                let layouts = [descriptor_set_layout];
                 let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
                     .descriptor_pool(descriptor_pool)
                     .set_layouts(&layouts);
@@ -237,6 +264,7 @@ impl Graph {
 
             let built_passes = vec![BuiltPass {
                 clear_values,
+                descriptor_set_layout,
                 descriptor_set,
             }];
             built_passes
@@ -352,7 +380,7 @@ impl Graph {
                 ..Default::default()
             };
 
-            let set_layouts = [uniform_buffer_layout];
+            let set_layouts = [built_passes[0].descriptor_set_layout];
             let pipeline_layout_create_info =
                 vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
 
