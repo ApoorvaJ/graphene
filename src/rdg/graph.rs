@@ -2,10 +2,12 @@ use crate::*;
 
 pub struct BuiltPass {
     pub clear_values: Vec<vk::ClearValue>,
+    pub descriptor_set: vk::DescriptorSet,
 }
 
 pub struct Graph {
-    pub device: ash::Device,
+    device: ash::Device,
+    descriptor_pool: vk::DescriptorPool,
     pub render_pass: vk::RenderPass,
     pub framebuffer: vk::Framebuffer,
     pub pipeline_layout: vk::PipelineLayout,
@@ -17,6 +19,13 @@ pub struct Graph {
 impl Drop for Graph {
     fn drop(&mut self) {
         unsafe {
+            for built_pass in &mut self.built_passes {
+                let sets = [built_pass.descriptor_set];
+                self.device
+                    .free_descriptor_sets(self.descriptor_pool, &sets);
+            }
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
@@ -129,6 +138,31 @@ impl Graph {
             }
         };
 
+        // # Create descriptor pool
+        let descriptor_pool = {
+            let pool_sizes = [
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: 1, // TODO: Derive this number
+                },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1, // TODO: Derive this number
+                },
+            ];
+
+            let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
+                .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+                .max_sets(1) // TODO: Derive this number
+                .pool_sizes(&pool_sizes);
+
+            unsafe {
+                device
+                    .create_descriptor_pool(&descriptor_pool_create_info, None)
+                    .expect("Failed to create descriptor pool.")
+            }
+        };
+
         // Bake passes
         let built_passes = {
             let mut clear_values = Vec::new();
@@ -150,7 +184,61 @@ impl Graph {
                 })
             }
 
-            let built_passes = vec![BuiltPass { clear_values }];
+            let descriptor_set = {
+                let layouts = [uniform_buffer_layout];
+                let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+                    .descriptor_pool(descriptor_pool)
+                    .set_layouts(&layouts);
+                let descriptor_sets = unsafe {
+                    device
+                        .allocate_descriptor_sets(&descriptor_set_allocate_info)
+                        .expect("Failed to allocate descriptor sets.")
+                };
+                let (vk_buffer, buffer_size) = pass.buffer_info;
+                let descriptor_buffer_info = [vk::DescriptorBufferInfo {
+                    buffer: vk_buffer,
+                    offset: 0,
+                    range: buffer_size as u64,
+                }];
+
+                let (input_image_view, input_sampler) = pass.input_texture;
+                let descriptor_image_info = [vk::DescriptorImageInfo {
+                    sampler: input_sampler,
+                    image_view: input_image_view,
+                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                }];
+
+                let descriptor_write_sets = [
+                    vk::WriteDescriptorSet {
+                        dst_set: descriptor_sets[0],
+                        dst_binding: 0,
+                        dst_array_element: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                        p_buffer_info: descriptor_buffer_info.as_ptr(),
+                        ..Default::default()
+                    },
+                    vk::WriteDescriptorSet {
+                        dst_set: descriptor_sets[0],
+                        dst_binding: 1,
+                        dst_array_element: 0,
+                        descriptor_count: 1,
+                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        p_image_info: descriptor_image_info.as_ptr(),
+                        ..Default::default()
+                    },
+                ];
+
+                unsafe {
+                    device.update_descriptor_sets(&descriptor_write_sets, &[]);
+                }
+                descriptor_sets[0]
+            };
+
+            let built_passes = vec![BuiltPass {
+                clear_values,
+                descriptor_set,
+            }];
             built_passes
         };
 
@@ -316,6 +404,7 @@ impl Graph {
 
         Graph {
             device,
+            descriptor_pool,
             render_pass,
             framebuffer,
             graphics_pipeline,
@@ -325,12 +414,7 @@ impl Graph {
         }
     }
 
-    pub fn begin_pass(
-        &self,
-        _pass_handle: u64,
-        command_buffer: vk::CommandBuffer,
-        descriptor_set: vk::DescriptorSet,
-    ) {
+    pub fn begin_pass(&self, _pass_handle: u64, command_buffer: vk::CommandBuffer) {
         let pass = &self.passes[0];
         let built_pass = &self.built_passes[0];
 
@@ -389,7 +473,7 @@ impl Graph {
             }
             // Bind descriptor sets
             {
-                let sets = [descriptor_set];
+                let sets = [built_pass.descriptor_set];
                 self.device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,

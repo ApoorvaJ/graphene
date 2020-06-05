@@ -12,8 +12,6 @@ pub struct Context {
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
     pub mesh: Mesh,
-    pub descriptor_pool: vk::DescriptorPool,
-    pub descriptor_sets: Vec<vk::DescriptorSet>,
     pub uniform_buffer_layout: vk::DescriptorSetLayout,
     pub uniform_buffers: Vec<HostVisibleBuffer>,
     pub environment_texture: Texture,
@@ -49,9 +47,6 @@ impl Drop for Context {
             self.gpu
                 .device
                 .destroy_descriptor_set_layout(self.uniform_buffer_layout, None);
-            self.gpu
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
 
             self.gpu
                 .device
@@ -73,7 +68,9 @@ fn create_render_graph(
     uniform_buffer_layout: vk::DescriptorSetLayout,
     command_buffers: &Vec<vk::CommandBuffer>,
     mesh: &Mesh,
-    descriptor_sets: &Vec<vk::DescriptorSet>,
+    uniform_buffers: &Vec<HostVisibleBuffer>,
+    environment_texture: &Texture,
+    environment_sampler: vk::Sampler,
 ) -> Vec<Graph> {
     let graphs = (0..command_buffers.len())
         .map(|i| {
@@ -82,6 +79,9 @@ fn create_render_graph(
                 "forward lit",
                 &vec![&facade.swapchain_textures[i]],
                 Some(&facade.depth_texture),
+                &uniform_buffers[i],
+                &environment_texture,
+                environment_sampler,
             );
 
             let graph = Graph::new(graph_builder, shader_modules, uniform_buffer_layout);
@@ -92,7 +92,7 @@ fn create_render_graph(
                     .unwrap();
             }
 
-            graph.begin_pass(pass_0, command_buffers[i], descriptor_sets[i]);
+            graph.begin_pass(pass_0, command_buffers[i]);
             unsafe {
                 // Bind index and vertex buffers
                 {
@@ -147,7 +147,9 @@ impl Context {
             self.uniform_buffer_layout,
             &self.command_buffers,
             &self.mesh,
-            &self.descriptor_sets,
+            &self.uniform_buffers,
+            &self.environment_texture,
+            self.environment_sampler,
         );
     }
 
@@ -253,89 +255,6 @@ impl Context {
             }
         };
 
-        // # Create descriptor pool
-        let descriptor_pool = {
-            let pool_sizes = [
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: facade.num_frames as u32,
-                },
-                vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    descriptor_count: facade.num_frames as u32,
-                },
-            ];
-
-            let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo::builder()
-                .max_sets(facade.num_frames as u32)
-                .pool_sizes(&pool_sizes);
-
-            unsafe {
-                gpu.device
-                    .create_descriptor_pool(&descriptor_pool_create_info, None)
-                    .expect("Failed to create descriptor pool.")
-            }
-        };
-
-        // # Create descriptor sets
-        let descriptor_sets = {
-            let layouts: Vec<vk::DescriptorSetLayout> = (0..facade.num_frames)
-                .map(|_| uniform_buffer_layout)
-                .collect();
-
-            let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(descriptor_pool)
-                .set_layouts(&layouts);
-
-            let descriptor_sets = unsafe {
-                gpu.device
-                    .allocate_descriptor_sets(&descriptor_set_allocate_info)
-                    .expect("Failed to allocate descriptor sets.")
-            };
-
-            for (i, &descriptor_set) in descriptor_sets.iter().enumerate() {
-                let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-                    buffer: uniform_buffers[i].vk_buffer,
-                    offset: 0,
-                    range: uniform_buffer_size as u64,
-                }];
-
-                let descriptor_image_info = [vk::DescriptorImageInfo {
-                    sampler: environment_sampler,
-                    image_view: environment_texture.image_view,
-                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                }];
-
-                let descriptor_write_sets = [
-                    vk::WriteDescriptorSet {
-                        dst_set: descriptor_set,
-                        dst_binding: 0,
-                        dst_array_element: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: descriptor_buffer_info.as_ptr(),
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_set: descriptor_set,
-                        dst_binding: 1,
-                        dst_array_element: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                        p_image_info: descriptor_image_info.as_ptr(),
-                        ..Default::default()
-                    },
-                ];
-
-                unsafe {
-                    gpu.device
-                        .update_descriptor_sets(&descriptor_write_sets, &[]);
-                }
-            }
-
-            descriptor_sets
-        };
-
         // # Allocate command buffers
         let command_buffers = {
             let info = vk::CommandBufferAllocateInfo::builder()
@@ -362,7 +281,9 @@ impl Context {
             uniform_buffer_layout,
             &command_buffers,
             &mesh,
-            &descriptor_sets,
+            &uniform_buffers,
+            &environment_texture,
+            environment_sampler,
         );
 
         // Add expect messages to all these unwraps
@@ -384,8 +305,6 @@ impl Context {
             shader_modules,
             command_pool,
             mesh,
-            descriptor_pool,
-            descriptor_sets,
             uniform_buffer_layout,
             uniform_buffers,
             environment_texture,
@@ -531,7 +450,9 @@ impl Context {
                                 self.uniform_buffer_layout,
                                 &self.command_buffers,
                                 &self.mesh,
-                                &self.descriptor_sets,
+                                &self.uniform_buffers,
+                                &self.environment_texture,
+                                self.environment_sampler,
                             );
                         }
                     }

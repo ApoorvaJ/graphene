@@ -3,9 +3,11 @@ use crate::*;
 pub struct Pass {
     pub name: String,
     pub outputs: Vec<(vk::ImageView, vk::Format)>,
+    pub input_texture: (vk::ImageView, vk::Sampler),
     pub opt_depth: Option<(vk::ImageView, vk::Format)>,
     pub viewport_width: u32,
     pub viewport_height: u32,
+    pub buffer_info: (vk::Buffer, u64), // (vk_buffer, size)
 }
 
 pub struct GraphBuilder {
@@ -28,6 +30,10 @@ impl GraphBuilder {
         name: &str,
         output_texs: &Vec<&Texture>,
         opt_depth_tex: Option<&Texture>,
+        // TODO: Remove these params
+        buffer: &HostVisibleBuffer,
+        environment_texture: &Texture,
+        environment_sampler: vk::Sampler,
     ) -> u64 {
         let outputs = output_texs
             .iter()
@@ -36,12 +42,15 @@ impl GraphBuilder {
         let opt_depth = opt_depth_tex.map(|depth_tex| (depth_tex.image_view, depth_tex.format));
         let viewport_width = output_texs[0].width;
         let viewport_height = output_texs[0].height;
+
         self.passes.push(Pass {
             name: String::from(name),
             outputs,
+            input_texture: (environment_texture.image_view, environment_sampler),
             opt_depth,
             viewport_width,
             viewport_height,
+            buffer_info: (buffer.vk_buffer, buffer.size),
         });
 
         let pass_handle = self.next_pass_handle;
