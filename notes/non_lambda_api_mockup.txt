@@ -60,7 +60,7 @@ let pass_1 = graph_builder.add_pass(
 );
 
 /* Step 2: Building */
-let graph = graph_builder.build();
+let graph = Graph::new(graph_builder); // Moves graph_builder
 
 /* Step 3: Execution */
 graph.begin_pass(pass_0, cmd_buf);

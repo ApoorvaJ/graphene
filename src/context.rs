@@ -77,17 +77,14 @@ fn create_render_graph(
 ) -> Vec<Graph> {
     let graphs = (0..command_buffers.len())
         .map(|i| {
-            let mut foo = 0;
-            let mut graph = GraphBuilder::new(gpu)
-                .add_pass(
-                    Pass::new("forward lit", move |_command_buffer: vk::CommandBuffer| {
-                        foo += 1;
-                        println!("Forward lit lambda: {}", foo);
-                    })
-                    .with_output_depth(&facade.depth_texture)
-                    .with_output_color(&facade.swapchain_textures[i]),
-                )
-                .build(shader_modules, uniform_buffer_layout);
+            let mut graph_builder = GraphBuilder::new(gpu);
+            graph_builder.add_pass(
+                "forward lit",
+                &vec![&facade.swapchain_textures[i]],
+                Some(&facade.depth_texture),
+            );
+
+            let graph = Graph::new(graph_builder, shader_modules, uniform_buffer_layout);
 
             unsafe {
                 gpu.device
