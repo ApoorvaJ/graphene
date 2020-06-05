@@ -78,7 +78,7 @@ fn create_render_graph(
     let graphs = (0..command_buffers.len())
         .map(|i| {
             let mut graph_builder = GraphBuilder::new(gpu);
-            graph_builder.add_pass(
+            let pass_0 = graph_builder.add_pass(
                 "forward lit",
                 &vec![&facade.swapchain_textures[i]],
                 Some(&facade.depth_texture),
@@ -91,7 +91,37 @@ fn create_render_graph(
                     .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
                     .unwrap();
             }
-            graph.record_command_buffer(command_buffers[i], mesh, descriptor_sets, i);
+
+            graph.begin_pass(pass_0, command_buffers[i], descriptor_sets[i]);
+            unsafe {
+                // Bind index and vertex buffers
+                {
+                    let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
+                    let offsets = [0_u64];
+                    gpu.device.cmd_bind_vertex_buffers(
+                        command_buffers[i],
+                        0,
+                        &vertex_buffers,
+                        &offsets,
+                    );
+                    gpu.device.cmd_bind_index_buffer(
+                        command_buffers[i],
+                        mesh.index_buffer.vk_buffer,
+                        0,
+                        vk::IndexType::UINT32,
+                    );
+                }
+
+                gpu.device.cmd_draw_indexed(
+                    command_buffers[i],
+                    mesh.index_buffer.num_elements as u32,
+                    1,
+                    0,
+                    0,
+                    0,
+                );
+            }
+            graph.end_pass(command_buffers[i]);
 
             graph
         })

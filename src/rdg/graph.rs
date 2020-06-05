@@ -325,13 +325,11 @@ impl Graph {
         }
     }
 
-    pub fn record_command_buffer(
+    pub fn begin_pass(
         &self,
-        //TODO: Remove these params
+        _pass_handle: u64,
         command_buffer: vk::CommandBuffer,
-        mesh: &Mesh,
-        descriptor_sets: &[vk::DescriptorSet],
-        idx: usize,
+        descriptor_set: vk::DescriptorSet,
     ) {
         let pass = &self.passes[0];
         let built_pass = &self.built_passes[0];
@@ -389,23 +387,9 @@ impl Graph {
                 }];
                 self.device.cmd_set_scissor(command_buffer, 0, &scissors);
             }
-            // Bind index and vertex buffers
-            {
-                let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
-                let offsets = [0_u64];
-                self.device
-                    .cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-                self.device.cmd_bind_index_buffer(
-                    command_buffer,
-                    mesh.index_buffer.vk_buffer,
-                    0,
-                    vk::IndexType::UINT32,
-                );
-            }
-
             // Bind descriptor sets
             {
-                let sets = [descriptor_sets[idx]];
+                let sets = [descriptor_set];
                 self.device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -415,16 +399,11 @@ impl Graph {
                     &[],
                 );
             }
+        }
+    }
 
-            self.device.cmd_draw_indexed(
-                command_buffer,
-                mesh.index_buffer.num_elements as u32,
-                1,
-                0,
-                0,
-                0,
-            );
-
+    pub fn end_pass(&self, command_buffer: vk::CommandBuffer) {
+        unsafe {
             self.device.cmd_end_render_pass(command_buffer);
 
             self.device

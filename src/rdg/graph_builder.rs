@@ -11,6 +11,7 @@ pub struct Pass {
 pub struct GraphBuilder {
     pub device: ash::Device,
     pub passes: Vec<Pass>,
+    next_pass_handle: u64, // TODO: When we switch to pass hashing, delete this.
 }
 
 impl GraphBuilder {
@@ -18,6 +19,7 @@ impl GraphBuilder {
         GraphBuilder {
             device: gpu.device.clone(),
             passes: Vec::new(),
+            next_pass_handle: 0,
         }
     }
 
@@ -26,7 +28,7 @@ impl GraphBuilder {
         name: &str,
         output_texs: &Vec<&Texture>,
         opt_depth_tex: Option<&Texture>,
-    ) {
+    ) -> u64 {
         let outputs = output_texs
             .iter()
             .map(|tex| (tex.image_view, tex.format))
@@ -41,5 +43,9 @@ impl GraphBuilder {
             viewport_width,
             viewport_height,
         });
+
+        let pass_handle = self.next_pass_handle;
+        self.next_pass_handle += 1;
+        pass_handle
     }
 }
