@@ -227,6 +227,9 @@ impl Context {
 
     pub fn begin_frame(&mut self) -> (bool, usize, f32) {
         let mut is_running = true;
+        let mut resize_needed = false;
+        let viewport_width = self.facade.swapchain_textures[0].width;
+        let viewport_height = self.facade.swapchain_textures[0].height;
 
         self.event_loop.run_return(|event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
@@ -247,6 +250,13 @@ impl Context {
                             _ => {}
                         },
                     },
+                    WindowEvent::Resized(physical_size) => {
+                        if viewport_width != physical_size.width
+                            || viewport_height != physical_size.height
+                        {
+                            resize_needed = true;
+                        }
+                    }
                     _ => {}
                 },
                 Event::MainEventsCleared => {
@@ -256,8 +266,11 @@ impl Context {
             }
         });
 
-        // Acquiring the swapchain image fails if the window has been resized. If this happens, we need
-        // to loop over and recreate the resolution-dependent state, and then try again.
+        if resize_needed {
+            self.recreate_resolution_dependent_state();
+        }
+
+        // Begin frame
         let mut opt_frame_idx = None;
         loop {
             let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
