@@ -1,3 +1,5 @@
+use ash::version::DeviceV1_0;
+use ash::vk;
 use glam::*;
 use std::f32::consts::PI;
 
@@ -13,11 +15,9 @@ struct UniformBuffer {
 
 fn main() {
     let ctx = graphene::Context::new(std::mem::size_of::<UniformBuffer>());
-    let mut foo = 1;
     // TODO: Set up pipeline and upload assets here
 
     ctx.run_loop(move |ctx, elapsed_seconds, frame_idx| {
-        foo += 1;
         // Update uniform buffer
         let mtx_model_to_world =
             Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
@@ -44,5 +44,39 @@ fn main() {
         }];
 
         ctx.uniform_buffers[frame_idx].upload_data(&ubos, 0, &ctx.gpu);
+
+        // Build and execute render graph
+        {
+            let mut graph_builder = graphene::GraphBuilder::new();
+            let pass_0 = graph_builder.add_pass(
+                "forward lit",
+                &vec![&ctx.facade.swapchain_textures[frame_idx]],
+                Some(&ctx.facade.depth_texture),
+                &ctx.shader_modules,
+                &ctx.uniform_buffers[frame_idx],
+                &ctx.environment_texture,
+                ctx.environment_sampler,
+            );
+
+            let device = ctx.gpu.device.clone();
+            let cmd_buf = ctx.command_buffers[frame_idx];
+            let vertex_buf = ctx.mesh.vertex_buffer.vk_buffer;
+            let index_buf = ctx.mesh.index_buffer.vk_buffer;
+            let num_mesh_indices = ctx.mesh.index_buffer.num_elements as u32;
+            let graph = ctx.build_graph(graph_builder);
+            graph.begin_pass(pass_0, cmd_buf);
+            unsafe {
+                // Bind index and vertex buffers
+                {
+                    let vertex_buffers = [vertex_buf];
+                    let offsets = [0_u64];
+                    device.cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
+                    device.cmd_bind_index_buffer(cmd_buf, index_buf, 0, vk::IndexType::UINT32);
+                }
+
+                device.cmd_draw_indexed(cmd_buf, num_mesh_indices, 1, 0, 0, 0);
+            }
+            graph.end_pass(cmd_buf);
+        }
     });
 }

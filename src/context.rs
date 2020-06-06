@@ -255,52 +255,17 @@ impl Context {
         };
 
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
-        // Build and execute render graph
-        {
-            let i = image_index as usize;
-            let mut graph_builder = GraphBuilder::new();
-            let pass_0 = graph_builder.add_pass(
-                "forward lit",
-                &vec![&self.facade.swapchain_textures[i]],
-                Some(&self.facade.depth_texture),
-                &self.shader_modules,
-                &self.uniform_buffers[i],
-                &self.environment_texture,
-                self.environment_sampler,
-            );
 
-            unsafe {
-                self.gpu
-                    .device
-                    .reset_command_buffer(
-                        self.command_buffers[i],
-                        vk::CommandBufferResetFlags::empty(),
-                    )
-                    .unwrap();
-            }
-
-            // TODO: Avoid cloning these variables. Most will disappear when moved to main.rs.
-            let device = self.gpu.device.clone();
-            let cmd_buf = self.command_buffers[i];
-            let vertex_buf = self.mesh.vertex_buffer.vk_buffer;
-            let index_buf = self.mesh.index_buffer.vk_buffer;
-            let num_mesh_indices = self.mesh.index_buffer.num_elements as u32;
-            //
-            let graph = self.build_graph(graph_builder);
-            graph.begin_pass(pass_0, cmd_buf);
-            unsafe {
-                // Bind index and vertex buffers
-                {
-                    let vertex_buffers = [vertex_buf];
-                    let offsets = [0_u64];
-                    device.cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
-                    device.cmd_bind_index_buffer(cmd_buf, index_buf, 0, vk::IndexType::UINT32);
-                }
-
-                device.cmd_draw_indexed(cmd_buf, num_mesh_indices, 1, 0, 0, 0);
-            }
-            graph.end_pass(cmd_buf);
+        unsafe {
+            self.gpu
+                .device
+                .reset_command_buffer(
+                    self.command_buffers[image_index as usize],
+                    vk::CommandBufferResetFlags::empty(),
+                )
+                .unwrap();
         }
+
         on_draw(self, elapsed_seconds, image_index as usize);
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
