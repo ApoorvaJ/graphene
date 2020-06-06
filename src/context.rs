@@ -266,11 +266,14 @@ impl Context {
             }
         });
 
+        // This mechanism is need on Windows:
         if resize_needed {
             self.recreate_resolution_dependent_state();
         }
 
-        // Begin frame
+        // This mechanism suffices on Linux:
+        // Acquiring the swapchain image fails if the window has been resized. If this happens, we need
+        // to loop over and recreate the resolution-dependent state, and then try again.
         let mut opt_frame_idx = None;
         loop {
             let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
