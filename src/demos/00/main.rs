@@ -14,8 +14,25 @@ struct UniformBuffer {
 }
 
 fn main() {
-    let mut ctx = graphene::Context::new(std::mem::size_of::<UniformBuffer>());
-    // TODO: Set up pipeline and upload assets here
+    let mut ctx = graphene::Context::new();
+    let uniform_buffer_size = std::mem::size_of::<UniformBuffer>();
+
+    let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
+    let environment_sampler = graphene::Sampler::new(&ctx.gpu);
+    let environment_texture = graphene::Texture::new_from_image(
+        std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.jpg"),
+        &ctx.gpu,
+        ctx.command_pool,
+    );
+    let uniform_buffers: Vec<graphene::HostVisibleBuffer> = (0..ctx.facade.num_frames)
+        .map(|_| {
+            graphene::HostVisibleBuffer::new(
+                uniform_buffer_size as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                &ctx.gpu,
+            )
+        })
+        .collect();
 
     loop {
         let (is_running, frame_idx, elapsed_seconds) = ctx.begin_frame();
@@ -44,7 +61,7 @@ fn main() {
             elapsed_seconds,
         }];
 
-        ctx.uniform_buffers[frame_idx].upload_data(&ubos, 0, &ctx.gpu);
+        uniform_buffers[frame_idx].upload_data(&ubos, 0, &ctx.gpu);
 
         // Build and execute render graph
         {
@@ -54,16 +71,16 @@ fn main() {
                 &vec![&ctx.facade.swapchain_textures[frame_idx]],
                 Some(&ctx.facade.depth_texture),
                 &ctx.shader_modules,
-                &ctx.uniform_buffers[frame_idx],
-                &ctx.environment_texture,
-                ctx.environment_sampler,
+                &uniform_buffers[frame_idx],
+                &environment_texture,
+                &environment_sampler,
             );
 
             let device = ctx.gpu.device.clone();
             let cmd_buf = ctx.command_buffers[frame_idx];
-            let vertex_buf = ctx.mesh.vertex_buffer.vk_buffer;
-            let index_buf = ctx.mesh.index_buffer.vk_buffer;
-            let num_mesh_indices = ctx.mesh.index_buffer.num_elements as u32;
+            let vertex_buf = mesh.vertex_buffer.vk_buffer;
+            let index_buf = mesh.index_buffer.vk_buffer;
+            let num_mesh_indices = mesh.index_buffer.num_elements as u32;
             let graph = ctx.build_graph(graph_builder);
             graph.begin_pass(pass_0, cmd_buf);
             unsafe {
@@ -85,5 +102,13 @@ fn main() {
         if !is_running {
             break;
         }
+    }
+
+    // TODO: Remove the necessity for this sync
+    unsafe {
+        ctx.gpu
+            .device
+            .device_wait_idle()
+            .expect("Failed to wait device idle!");
     }
 }

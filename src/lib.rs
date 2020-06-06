@@ -15,6 +15,8 @@ pub mod mesh;
 pub use mesh::*;
 pub mod rdg;
 pub use rdg::*;
+pub mod sampler;
+pub use sampler::*;
 pub mod texture;
 pub use texture::*;
 pub mod utils;

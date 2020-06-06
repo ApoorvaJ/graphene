@@ -14,10 +14,6 @@ pub struct Context {
     graph_cache: Vec<(Graph, u64)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
-    pub mesh: Mesh,
-    pub uniform_buffers: Vec<HostVisibleBuffer>,
-    pub environment_texture: Texture,
-    pub environment_sampler: vk::Sampler,
 
     pub current_frame: usize,
     start_instant: std::time::Instant,
@@ -48,10 +44,6 @@ impl Drop for Context {
 
             self.facade.destroy(&self.gpu);
 
-            self.gpu
-                .device
-                .destroy_sampler(self.environment_sampler, None);
-
             for stage in &self.shader_modules {
                 self.gpu.device.destroy_shader_module(*stage, None);
             }
@@ -71,7 +63,7 @@ impl Context {
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
     }
 
-    pub fn new(uniform_buffer_size: usize) -> Context {
+    pub fn new() -> Context {
         const APP_NAME: &str = "";
 
         // # Init window
@@ -101,48 +93,8 @@ impl Context {
             }
         };
 
-        let mesh = Mesh::load("assets/meshes/suzanne.glb", &gpu, command_pool);
-
         // TODO: Move this up?
         let facade = Facade::new(&basis, &gpu, &window);
-
-        // # Create the uniform buffer
-        let uniform_buffers: Vec<HostVisibleBuffer> = (0..facade.num_frames)
-            .map(|_| {
-                HostVisibleBuffer::new(
-                    uniform_buffer_size as u64,
-                    vk::BufferUsageFlags::UNIFORM_BUFFER,
-                    &gpu,
-                )
-            })
-            .collect();
-
-        // # Environment texture
-        let environment_texture = Texture::new_from_image(
-            std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.jpg"),
-            &gpu,
-            command_pool,
-        );
-
-        // TODO: Spin this out into separate struct/function
-        let environment_sampler = {
-            let sampler_create_info = vk::SamplerCreateInfo::builder()
-                .mag_filter(vk::Filter::LINEAR)
-                .min_filter(vk::Filter::LINEAR)
-                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                .address_mode_u(vk::SamplerAddressMode::REPEAT)
-                .address_mode_v(vk::SamplerAddressMode::REPEAT)
-                .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                .anisotropy_enable(true) // TODO: Disable this by default?
-                .max_anisotropy(16.0) //
-                .border_color(vk::BorderColor::INT_OPAQUE_BLACK);
-
-            unsafe {
-                gpu.device
-                    .create_sampler(&sampler_create_info, None)
-                    .expect("Failed to create Sampler!")
-            }
-        };
 
         // # Allocate command buffers
         let command_buffers = {
@@ -180,10 +132,6 @@ impl Context {
             graph_cache: Vec::new(),
             shader_modules,
             command_pool,
-            mesh,
-            uniform_buffers,
-            environment_texture,
-            environment_sampler,
 
             current_frame: 0,
             start_instant: std::time::Instant::now(),

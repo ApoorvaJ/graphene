@@ -30,7 +30,7 @@ impl GraphBuilder {
         shader_modules: &Vec<vk::ShaderModule>,
         buffer: &HostVisibleBuffer,
         environment_texture: &Texture,
-        environment_sampler: vk::Sampler,
+        environment_sampler: &Sampler,
     ) -> u64 {
         // TODO: Assert that color and depth textures have the same resolution
         let outputs = output_texs
@@ -48,7 +48,10 @@ impl GraphBuilder {
         self.passes.push(Pass {
             name: String::from(name),
             outputs,
-            input_texture: (environment_texture.image_view, environment_sampler),
+            input_texture: (
+                environment_texture.image_view,
+                environment_sampler.vk_sampler,
+            ),
             opt_depth,
             viewport_width,
             viewport_height,
