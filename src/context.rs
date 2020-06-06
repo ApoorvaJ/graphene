@@ -5,10 +5,11 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::desktop::EventLoopExtDesktop;
 
 pub struct Context {
     window: winit::window::Window,
-    event_loop: Option<winit::event_loop::EventLoop<()>>,
+    event_loop: winit::event_loop::EventLoop<()>,
 
     graph_cache: Vec<(Graph, u64)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
@@ -33,6 +34,10 @@ pub struct Context {
 impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
+            self.gpu
+                .device
+                .device_wait_idle()
+                .expect("Failed to wait device idle!");
             self.gpu
                 .device
                 .free_command_buffers(self.command_pool, &self.command_buffers);
@@ -60,7 +65,7 @@ impl Context {
             self.gpu
                 .device
                 .device_wait_idle()
-                .expect("Failed to wait device idle!")
+                .expect("Failed to wait device idle x")
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
@@ -170,7 +175,7 @@ impl Context {
 
         Context {
             window,
-            event_loop: Some(event_loop),
+            event_loop: event_loop,
 
             graph_cache: Vec::new(),
             shader_modules,
@@ -220,13 +225,55 @@ impl Context {
         &self.graph_cache[return_idx].0
     }
 
-    fn draw_frame<F>(&mut self, on_draw: &mut F)
-    where
-        F: FnMut(&mut Context, f32, usize),
-    {
+    pub fn begin_frame(&mut self) -> Option<(bool, usize, f32)> {
+        let mut is_running = true;
+        let mut resize_needed = false;
+        let viewport_width = self.facade.swapchain_textures[0].width;
+        let viewport_height = self.facade.swapchain_textures[0].height;
+
+        self.event_loop.run_return(|event, _, control_flow| {
+            *control_flow = ControlFlow::Wait;
+
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => is_running = false,
+                    WindowEvent::KeyboardInput { input, .. } => match input {
+                        KeyboardInput {
+                            virtual_keycode,
+                            state,
+                            ..
+                        } => match (virtual_keycode, state) {
+                            (Some(VirtualKeyCode::Escape), ElementState::Pressed)
+                            | (Some(VirtualKeyCode::Return), ElementState::Pressed) => {
+                                is_running = false;
+                            }
+                            _ => {}
+                        },
+                    },
+                    WindowEvent::Resized(physical_size) => {
+                        if viewport_width != physical_size.width
+                            || viewport_height != physical_size.height
+                        {
+                            resize_needed = true;
+                        }
+                    }
+                    _ => {}
+                },
+                Event::MainEventsCleared => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                _ => (),
+            }
+        });
+
+        if resize_needed {
+            self.recreate_resolution_dependent_state();
+        }
+
+        // Begin frame
         let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
 
-        let (image_index, _is_sub_optimal) = unsafe {
+        let frame_idx = unsafe {
             self.gpu
                 .device
                 .wait_for_fences(&wait_fences, true, std::u64::MAX)
@@ -239,14 +286,14 @@ impl Context {
                 vk::Fence::null(),
             );
             match result {
-                Ok(image_idx) => image_idx,
+                Ok((frame_idx, _is_suboptimal)) => frame_idx as usize,
                 Err(error_code) => {
                     match error_code {
                         vk::Result::ERROR_OUT_OF_DATE_KHR => {
                             // Window is resized. Recreate the swapchain
                             // and exit early without drawing this frame.
                             self.recreate_resolution_dependent_state();
-                            return;
+                            return None;
                         }
                         _ => panic!("Failed to acquire swapchain image."),
                     }
@@ -260,18 +307,20 @@ impl Context {
             self.gpu
                 .device
                 .reset_command_buffer(
-                    self.command_buffers[image_index as usize],
+                    self.command_buffers[frame_idx],
                     vk::CommandBufferResetFlags::empty(),
                 )
                 .unwrap();
         }
 
-        on_draw(self, elapsed_seconds, image_index as usize);
+        Some((is_running, frame_idx, elapsed_seconds))
+    }
 
+    pub fn end_frame(&mut self, frame_idx: usize) {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.facade.image_available_semaphores[self.current_frame]];
         let signal_semaphores = [self.facade.render_finished_semaphores[self.current_frame]];
-        let command_buffers = [self.command_buffers[image_index as usize]];
+        let command_buffers = [self.command_buffers[frame_idx as usize]];
 
         let submit_infos = [vk::SubmitInfo {
             wait_semaphore_count: wait_semaphores.len() as u32,
@@ -284,6 +333,7 @@ impl Context {
             ..Default::default()
         }];
 
+        let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
         unsafe {
             self.gpu
                 .device
@@ -301,7 +351,7 @@ impl Context {
         }
 
         let swapchains = [self.facade.swapchain];
-        let image_indices = [image_index];
+        let image_indices = [frame_idx as u32];
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(&signal_semaphores)
@@ -354,57 +404,5 @@ impl Context {
         }
 
         self.current_frame = (self.current_frame + 1) % self.facade.num_frames;
-    }
-
-    pub fn run_loop<F: 'static>(mut self, mut on_draw: F)
-    where
-        F: FnMut(&mut Context, f32, usize),
-    {
-        self.event_loop
-            .take()
-            .unwrap()
-            .run(move |event, _, control_flow| match event {
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                    WindowEvent::Resized(physical_size) => {
-                        if self.facade.swapchain_textures[0].width != physical_size.width
-                            || self.facade.swapchain_textures[0].height != physical_size.height
-                        {
-                            self.recreate_resolution_dependent_state();
-                        }
-                    }
-                    WindowEvent::KeyboardInput { input, .. } => match input {
-                        KeyboardInput {
-                            virtual_keycode,
-                            state,
-                            ..
-                        } => match (virtual_keycode, state) {
-                            (Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
-                                *control_flow = ControlFlow::Exit
-                            }
-                            (Some(VirtualKeyCode::Return), ElementState::Pressed) => {
-                                *control_flow = ControlFlow::Exit
-                            }
-                            _ => {}
-                        },
-                    },
-                    _ => {}
-                },
-                Event::MainEventsCleared => {
-                    self.window.request_redraw();
-                }
-                Event::RedrawRequested(_window_id) => {
-                    self.draw_frame(&mut on_draw);
-                }
-                Event::LoopDestroyed => {
-                    unsafe {
-                        self.gpu
-                            .device
-                            .device_wait_idle()
-                            .expect("Failed to wait device idle!")
-                    };
-                }
-                _ => (),
-            })
     }
 }
