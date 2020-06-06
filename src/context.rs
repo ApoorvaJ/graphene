@@ -225,7 +225,7 @@ impl Context {
         &self.graph_cache[return_idx].0
     }
 
-    pub fn begin_frame(&mut self) -> Option<(bool, usize, f32)> {
+    pub fn begin_frame(&mut self) -> (bool, usize, f32) {
         let mut is_running = true;
         let mut resize_needed = false;
         let viewport_width = self.facade.swapchain_textures[0].width;
@@ -271,35 +271,45 @@ impl Context {
         }
 
         // Begin frame
-        let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
+        let mut opt_frame_idx = None;
+        loop {
+            let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
 
-        let frame_idx = unsafe {
-            self.gpu
-                .device
-                .wait_for_fences(&wait_fences, true, std::u64::MAX)
-                .expect("Failed to wait for Fence.");
+            unsafe {
+                self.gpu
+                    .device
+                    .wait_for_fences(&wait_fences, true, std::u64::MAX)
+                    .expect("Failed to wait for Fence.");
 
-            let result = self.facade.ext_swapchain.acquire_next_image(
-                self.facade.swapchain,
-                std::u64::MAX,
-                self.facade.image_available_semaphores[self.current_frame],
-                vk::Fence::null(),
-            );
-            match result {
-                Ok((frame_idx, _is_suboptimal)) => frame_idx as usize,
-                Err(error_code) => {
-                    match error_code {
-                        vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                            // Window is resized. Recreate the swapchain
-                            // and exit early without drawing this frame.
-                            self.recreate_resolution_dependent_state();
-                            return None;
+                let result = self.facade.ext_swapchain.acquire_next_image(
+                    self.facade.swapchain,
+                    std::u64::MAX,
+                    self.facade.image_available_semaphores[self.current_frame],
+                    vk::Fence::null(),
+                );
+                match result {
+                    Ok((idx, _is_suboptimal)) => {
+                        opt_frame_idx = Some(idx as usize);
+                    }
+                    Err(error_code) => {
+                        match error_code {
+                            vk::Result::ERROR_OUT_OF_DATE_KHR => {
+                                // Window is resized. Recreate the swapchain
+                                // and exit early without drawing this frame.
+                                self.recreate_resolution_dependent_state();
+                            }
+                            _ => panic!("Failed to acquire swapchain image."),
                         }
-                        _ => panic!("Failed to acquire swapchain image."),
                     }
                 }
             }
-        };
+
+            if opt_frame_idx.is_some() {
+                break;
+            }
+        }
+
+        let frame_idx = opt_frame_idx.unwrap();
 
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
 
@@ -313,7 +323,7 @@ impl Context {
                 .unwrap();
         }
 
-        Some((is_running, frame_idx, elapsed_seconds))
+        (is_running, frame_idx, elapsed_seconds)
     }
 
     pub fn end_frame(&mut self, frame_idx: usize) {
