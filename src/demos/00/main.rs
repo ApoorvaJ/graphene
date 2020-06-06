@@ -78,7 +78,7 @@ fn main() {
 
             let cmd_buf = ctx.command_buffers[frame_idx];
             let graph = ctx.build_graph(graph_builder);
-            ctx.begin_pass(&graph, pass_0, frame_idx);
+            ctx.begin_pass(graph, pass_0, frame_idx);
             unsafe {
                 // Bind index and vertex buffers
                 {
@@ -104,7 +104,7 @@ fn main() {
                     0,
                 );
             }
-            ctx.end_pass(&graph, frame_idx);
+            ctx.end_pass(graph, frame_idx);
         }
 
         ctx.end_frame(frame_idx);

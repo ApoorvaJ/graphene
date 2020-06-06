@@ -7,6 +7,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
+#[derive(Copy, Clone)]
 pub struct GraphHandle(u64);
 
 pub struct Context {
@@ -367,7 +368,7 @@ impl Context {
 
     pub fn begin_pass(
         &self,
-        graph_handle: &GraphHandle,
+        graph_handle: GraphHandle,
         pass_handle: PassHandle,
         // TODO: Remove this param
         frame_idx: usize,
@@ -382,7 +383,7 @@ impl Context {
 
     pub fn end_pass(
         &self,
-        graph_handle: &GraphHandle,
+        graph_handle: GraphHandle,
         // TODO: Remove this param
         frame_idx: usize,
     ) {

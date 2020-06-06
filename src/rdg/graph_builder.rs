@@ -3,6 +3,7 @@ use crate::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+#[derive(Copy, Clone)]
 pub struct PassHandle(u64);
 
 #[derive(Hash)]
