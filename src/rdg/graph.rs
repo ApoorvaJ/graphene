@@ -437,7 +437,7 @@ impl Graph {
         }
     }
 
-    pub fn begin_pass(&self, _pass_handle: u64, command_buffer: vk::CommandBuffer) {
+    pub fn begin_pass(&self, _pass_handle: PassHandle, command_buffer: vk::CommandBuffer) {
         let pass = &self.passes[0];
         let built_pass = &self.built_passes[0];
 

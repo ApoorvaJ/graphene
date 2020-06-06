@@ -3,6 +3,8 @@ use crate::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+pub struct PassHandle(u64);
+
 #[derive(Hash)]
 pub struct Pass {
     pub name: String,
@@ -34,7 +36,7 @@ impl GraphBuilder {
         buffer: &HostVisibleBuffer,
         environment_texture: &Texture,
         environment_sampler: &Sampler,
-    ) -> u64 {
+    ) -> PassHandle {
         // TODO: Assert that color and depth textures have the same resolution
         let outputs = output_texs
             .iter()
@@ -67,6 +69,6 @@ impl GraphBuilder {
             self.passes[self.passes.len() - 1].hash(&mut hasher);
             hasher.finish()
         };
-        pass_hash
+        PassHandle(pass_hash)
     }
 }

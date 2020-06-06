@@ -76,25 +76,35 @@ fn main() {
                 &environment_sampler,
             );
 
-            let device = ctx.gpu.device.clone();
             let cmd_buf = ctx.command_buffers[frame_idx];
-            let vertex_buf = mesh.vertex_buffer.vk_buffer;
-            let index_buf = mesh.index_buffer.vk_buffer;
-            let num_mesh_indices = mesh.index_buffer.num_elements as u32;
             let graph = ctx.build_graph(graph_builder);
-            graph.begin_pass(pass_0, cmd_buf);
+            ctx.begin_pass(&graph, pass_0, frame_idx);
             unsafe {
                 // Bind index and vertex buffers
                 {
-                    let vertex_buffers = [vertex_buf];
+                    let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
                     let offsets = [0_u64];
-                    device.cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
-                    device.cmd_bind_index_buffer(cmd_buf, index_buf, 0, vk::IndexType::UINT32);
+                    ctx.gpu
+                        .device
+                        .cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
+                    ctx.gpu.device.cmd_bind_index_buffer(
+                        cmd_buf,
+                        mesh.index_buffer.vk_buffer,
+                        0,
+                        vk::IndexType::UINT32,
+                    );
                 }
 
-                device.cmd_draw_indexed(cmd_buf, num_mesh_indices, 1, 0, 0, 0);
+                ctx.gpu.device.cmd_draw_indexed(
+                    cmd_buf,
+                    mesh.index_buffer.num_elements as u32,
+                    1,
+                    0,
+                    0,
+                    0,
+                );
             }
-            graph.end_pass(cmd_buf);
+            ctx.end_pass(&graph, frame_idx);
         }
 
         ctx.end_frame(frame_idx);

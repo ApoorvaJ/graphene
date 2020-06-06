@@ -7,6 +7,8 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
+pub struct GraphHandle(u64);
+
 pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
@@ -146,7 +148,7 @@ impl Context {
         }
     }
 
-    pub fn build_graph(&mut self, graph_builder: GraphBuilder) -> &Graph {
+    pub fn build_graph(&mut self, graph_builder: GraphBuilder) -> GraphHandle {
         // Get the hash of the graph builder
         let req_hash: u64 = {
             let mut hasher = DefaultHasher::new();
@@ -159,18 +161,14 @@ impl Context {
             .iter()
             .position(|(_, cached_hash)| *cached_hash == req_hash);
 
-        let return_idx = if let Some(idx) = opt_idx {
-            // If a corresponding graph exists in the cache, return it
-            idx
-        } else {
+        if opt_idx.is_none() {
             // The requested graph doesn't exist. Build it and add it to the cache.
             println!("Adding graph to cache");
             self.graph_cache
                 .push((Graph::new(graph_builder, &self.gpu.device), req_hash));
-            self.graph_cache.len() - 1
-        };
+        }
 
-        &self.graph_cache[return_idx].0
+        GraphHandle(req_hash)
     }
 
     pub fn begin_frame(&mut self) -> (bool, usize, f32) {
@@ -365,5 +363,34 @@ impl Context {
         }
 
         self.current_frame = (self.current_frame + 1) % self.facade.num_frames;
+    }
+
+    pub fn begin_pass(
+        &self,
+        graph_handle: &GraphHandle,
+        pass_handle: PassHandle,
+        // TODO: Remove this param
+        frame_idx: usize,
+    ) {
+        let (graph, _) = self
+            .graph_cache
+            .iter()
+            .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
+            .expect("Graph not found in cache. Have you called build_graph()?");
+        graph.begin_pass(pass_handle, self.command_buffers[frame_idx])
+    }
+
+    pub fn end_pass(
+        &self,
+        graph_handle: &GraphHandle,
+        // TODO: Remove this param
+        frame_idx: usize,
+    ) {
+        let (graph, _) = self
+            .graph_cache
+            .iter()
+            .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
+            .expect("Graph not found in cache. Have you called build_graph()?");
+        graph.end_pass(self.command_buffers[frame_idx]);
     }
 }
