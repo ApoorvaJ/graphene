@@ -1,5 +1,8 @@
 use crate::*;
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 #[derive(Hash)]
 pub struct Pass {
     pub name: String,
@@ -59,6 +62,11 @@ impl GraphBuilder {
             shader_modules,
         });
 
-        0 // TODO: Replace with hash
+        let pass_hash: u64 = {
+            let mut hasher = DefaultHasher::new();
+            self.passes[self.passes.len() - 1].hash(&mut hasher);
+            hasher.finish()
+        };
+        pass_hash
     }
 }
