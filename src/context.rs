@@ -1,6 +1,8 @@
 use crate::*;
 
 use glam::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -8,6 +10,7 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<()>>,
 
+    graph_cache: Vec<(Graph, u64)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
     pub mesh: Mesh,
@@ -22,7 +25,6 @@ pub struct Context {
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
 
     pub command_buffers: Vec<vk::CommandBuffer>,
-    pub graphs: Vec<Graph>,
     pub facade: Facade, // Resolution-dependent apparatus
     pub gpu: Gpu,
     pub basis: Basis,
@@ -52,77 +54,6 @@ impl Drop for Context {
     }
 }
 
-// TODO: Delete this function, and call every loop. An in-flight render graph
-// cannot be destroyed, so we'll probably need one per swapchain image.
-fn create_render_graph(
-    gpu: &Gpu,
-    facade: &Facade,
-    shader_modules: &Vec<vk::ShaderModule>,
-    command_buffers: &Vec<vk::CommandBuffer>,
-    mesh: &Mesh,
-    uniform_buffers: &Vec<HostVisibleBuffer>,
-    environment_texture: &Texture,
-    environment_sampler: vk::Sampler,
-) -> Vec<Graph> {
-    let graphs = (0..command_buffers.len())
-        .map(|i| {
-            let mut graph_builder = GraphBuilder::new(gpu);
-            let pass_0 = graph_builder.add_pass(
-                "forward lit",
-                &vec![&facade.swapchain_textures[i]],
-                Some(&facade.depth_texture),
-                shader_modules,
-                &uniform_buffers[i],
-                &environment_texture,
-                environment_sampler,
-            );
-
-            let graph = Graph::new(graph_builder);
-
-            unsafe {
-                gpu.device
-                    .reset_command_buffer(command_buffers[i], vk::CommandBufferResetFlags::empty())
-                    .unwrap();
-            }
-
-            graph.begin_pass(pass_0, command_buffers[i]);
-            unsafe {
-                // Bind index and vertex buffers
-                {
-                    let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
-                    let offsets = [0_u64];
-                    gpu.device.cmd_bind_vertex_buffers(
-                        command_buffers[i],
-                        0,
-                        &vertex_buffers,
-                        &offsets,
-                    );
-                    gpu.device.cmd_bind_index_buffer(
-                        command_buffers[i],
-                        mesh.index_buffer.vk_buffer,
-                        0,
-                        vk::IndexType::UINT32,
-                    );
-                }
-
-                gpu.device.cmd_draw_indexed(
-                    command_buffers[i],
-                    mesh.index_buffer.num_elements as u32,
-                    1,
-                    0,
-                    0,
-                    0,
-                );
-            }
-            graph.end_pass(command_buffers[i]);
-
-            graph
-        })
-        .collect();
-
-    graphs
-}
-
 impl Context {
     pub fn recreate_resolution_dependent_state(&mut self) {
         unsafe {
@@ -133,16 +64,6 @@ impl Context {
         };
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
-        self.graphs = create_render_graph(
-            &self.gpu,
-            &self.facade,
-            &self.shader_modules,
-            &self.command_buffers,
-            &self.mesh,
-            &self.uniform_buffers,
-            &self.environment_texture,
-            self.environment_sampler,
-        );
     }
 
     pub fn new(uniform_buffer_size: usize) -> Context {
@@ -235,19 +156,6 @@ impl Context {
         let (shader_modules, _) =
             utils::get_shader_modules(&gpu).expect("Failed to load shader modules");
 
-        // Create render graph
-        // TODO: Move this to main.rs
-        let graphs = create_render_graph(
-            &gpu,
-            &facade,
-            &shader_modules,
-            &command_buffers,
-            &mesh,
-            &uniform_buffers,
-            &environment_texture,
-            environment_sampler,
-        );
-
         // Add expect messages to all these unwraps
         let (watcher, watch_rx) = {
             use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -264,6 +172,7 @@ impl Context {
             window,
             event_loop: Some(event_loop),
 
+            graph_cache: Vec::new(),
             shader_modules,
             command_pool,
             mesh,
@@ -278,11 +187,37 @@ impl Context {
             watch_rx,
 
             command_buffers,
-            graphs,
             facade,
             gpu,
             basis,
         }
+    }
+
+    pub fn build_graph(&mut self, graph_builder: GraphBuilder) -> &Graph {
+        // Get the hash of the graph builder
+        let req_hash: u64 = {
+            let mut hasher = DefaultHasher::new();
+            graph_builder.hash(&mut hasher);
+            hasher.finish()
+        };
+        // Try finding the requested graph in the cache
+        let opt_idx = self
+            .graph_cache
+            .iter()
+            .position(|(_, cached_hash)| *cached_hash == req_hash);
+
+        let return_idx = if let Some(idx) = opt_idx {
+            // If a corresponding graph exists in the cache, return it
+            idx
+        } else {
+            // The requested graph doesn't exist. Build it and add it to the cache.
+            println!("Adding graph to cache");
+            self.graph_cache
+                .push((Graph::new(graph_builder, &self.gpu.device), req_hash));
+            self.graph_cache.len() - 1
+        };
+
+        &self.graph_cache[return_idx].0
     }
 
     fn draw_frame<F>(&mut self, on_draw: &mut F)
@@ -320,6 +255,52 @@ impl Context {
         };
 
         let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
+        // Build and execute render graph
+        {
+            let i = image_index as usize;
+            let mut graph_builder = GraphBuilder::new();
+            let pass_0 = graph_builder.add_pass(
+                "forward lit",
+                &vec![&self.facade.swapchain_textures[i]],
+                Some(&self.facade.depth_texture),
+                &self.shader_modules,
+                &self.uniform_buffers[i],
+                &self.environment_texture,
+                self.environment_sampler,
+            );
+
+            unsafe {
+                self.gpu
+                    .device
+                    .reset_command_buffer(
+                        self.command_buffers[i],
+                        vk::CommandBufferResetFlags::empty(),
+                    )
+                    .unwrap();
+            }
+
+            // TODO: Avoid cloning these variables. Most will disappear when moved to main.rs.
+            let device = self.gpu.device.clone();
+            let cmd_buf = self.command_buffers[i];
+            let vertex_buf = self.mesh.vertex_buffer.vk_buffer;
+            let index_buf = self.mesh.index_buffer.vk_buffer;
+            let num_mesh_indices = self.mesh.index_buffer.num_elements as u32;
+            //
+            let graph = self.build_graph(graph_builder);
+            graph.begin_pass(pass_0, cmd_buf);
+            unsafe {
+                // Bind index and vertex buffers
+                {
+                    let vertex_buffers = [vertex_buf];
+                    let offsets = [0_u64];
+                    device.cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
+                    device.cmd_bind_index_buffer(cmd_buf, index_buf, 0, vk::IndexType::UINT32);
+                }
+
+                device.cmd_draw_indexed(cmd_buf, num_mesh_indices, 1, 0, 0, 0);
+            }
+            graph.end_pass(cmd_buf);
+        }
         on_draw(self, elapsed_seconds, image_index as usize);
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -391,7 +372,7 @@ impl Context {
                             .device_wait_idle()
                             .expect("Failed to wait device idle!");
                     }
-                    if let Some((shader_modules, num_changed)) =
+                    if let Some((shader_modules, _num_changed)) =
                         utils::get_shader_modules(&self.gpu)
                     {
                         // TODO: Wrap shader modules with a struct with a drop trait, and then delete this loop
@@ -401,20 +382,6 @@ impl Context {
                             }
                         }
                         self.shader_modules = shader_modules;
-
-                        if num_changed > 0 {
-                            // TODO: Delete this. Do this every frame instead.
-                            self.graphs = create_render_graph(
-                                &self.gpu,
-                                &self.facade,
-                                &self.shader_modules,
-                                &self.command_buffers,
-                                &self.mesh,
-                                &self.uniform_buffers,
-                                &self.environment_texture,
-                                self.environment_sampler,
-                            );
-                        }
                     }
                 }
                 _ => (),

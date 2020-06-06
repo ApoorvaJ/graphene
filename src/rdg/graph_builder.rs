@@ -1,5 +1,6 @@
 use crate::*;
 
+#[derive(Hash)]
 pub struct Pass {
     pub name: String,
     pub outputs: Vec<(vk::ImageView, vk::Format)>,
@@ -11,19 +12,14 @@ pub struct Pass {
     pub buffer_info: (vk::Buffer, u64), // (vk_buffer, size)
 }
 
+#[derive(Hash)]
 pub struct GraphBuilder {
-    pub device: ash::Device,
     pub passes: Vec<Pass>,
-    next_pass_handle: u64, // TODO: When we switch to pass hashing, delete this.
 }
 
 impl GraphBuilder {
-    pub fn new(gpu: &Gpu) -> GraphBuilder {
-        GraphBuilder {
-            device: gpu.device.clone(),
-            passes: Vec::new(),
-            next_pass_handle: 0,
-        }
+    pub fn new() -> GraphBuilder {
+        GraphBuilder { passes: Vec::new() }
     }
 
     pub fn add_pass(
@@ -60,8 +56,6 @@ impl GraphBuilder {
             shader_modules,
         });
 
-        let pass_handle = self.next_pass_handle;
-        self.next_pass_handle += 1;
-        pass_handle
+        0 // TODO: Replace with hash
     }
 }

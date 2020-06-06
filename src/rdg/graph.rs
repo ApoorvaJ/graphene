@@ -36,8 +36,7 @@ impl Drop for Graph {
 }
 
 impl Graph {
-    pub fn new(graph_builder: GraphBuilder) -> Graph {
-        let device = graph_builder.device;
+    pub fn new(graph_builder: GraphBuilder, device: &ash::Device) -> Graph {
         let pass = &graph_builder.passes[0];
 
         // # Create render pass
@@ -427,7 +426,7 @@ impl Graph {
         };
 
         Graph {
-            device,
+            device: device.clone(),
             descriptor_pool,
             render_pass,
             framebuffer,
