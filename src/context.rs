@@ -17,7 +17,8 @@ pub struct Context {
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
 
-    pub current_frame: usize,
+    pub sync_idx: usize,  // Index of the synchronization primitives
+    pub frame_idx: usize, // Index of the swapchain frame
 
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
@@ -134,7 +135,8 @@ impl Context {
             shader_modules,
             command_pool,
 
-            current_frame: 0,
+            sync_idx: 0,
+            frame_idx: 0,
 
             _watcher: watcher,
             watch_rx,
@@ -169,7 +171,7 @@ impl Context {
         GraphHandle(req_hash)
     }
 
-    pub fn begin_frame(&mut self) -> (bool, usize) {
+    pub fn begin_frame(&mut self) -> bool {
         let mut is_running = true;
         let mut resize_needed = false;
         let viewport_width = self.facade.swapchain_textures[0].width;
@@ -220,7 +222,7 @@ impl Context {
         // to loop over and recreate the resolution-dependent state, and then try again.
         let mut opt_frame_idx = None;
         loop {
-            let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
+            let wait_fences = [self.facade.command_buffer_complete_fences[self.sync_idx]];
 
             unsafe {
                 self.gpu
@@ -231,7 +233,7 @@ impl Context {
                 let result = self.facade.ext_swapchain.acquire_next_image(
                     self.facade.swapchain,
                     std::u64::MAX,
-                    self.facade.image_available_semaphores[self.current_frame],
+                    self.facade.image_available_semaphores[self.sync_idx],
                     vk::Fence::null(),
                 );
                 match result {
@@ -256,26 +258,26 @@ impl Context {
             }
         }
 
-        let frame_idx = opt_frame_idx.unwrap();
+        self.frame_idx = opt_frame_idx.unwrap();
 
         unsafe {
             self.gpu
                 .device
                 .reset_command_buffer(
-                    self.command_buffers[frame_idx],
+                    self.command_buffers[self.frame_idx],
                     vk::CommandBufferResetFlags::empty(),
                 )
                 .unwrap();
         }
 
-        (is_running, frame_idx)
+        is_running
     }
 
-    pub fn end_frame(&mut self, frame_idx: usize) {
+    pub fn end_frame(&mut self) {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let wait_semaphores = [self.facade.image_available_semaphores[self.current_frame]];
-        let signal_semaphores = [self.facade.render_finished_semaphores[self.current_frame]];
-        let command_buffers = [self.command_buffers[frame_idx as usize]];
+        let wait_semaphores = [self.facade.image_available_semaphores[self.sync_idx]];
+        let signal_semaphores = [self.facade.render_finished_semaphores[self.sync_idx]];
+        let command_buffers = [self.command_buffers[self.frame_idx as usize]];
 
         let submit_infos = [vk::SubmitInfo {
             wait_semaphore_count: wait_semaphores.len() as u32,
@@ -288,7 +290,7 @@ impl Context {
             ..Default::default()
         }];
 
-        let wait_fences = [self.facade.command_buffer_complete_fences[self.current_frame]];
+        let wait_fences = [self.facade.command_buffer_complete_fences[self.sync_idx]];
         unsafe {
             self.gpu
                 .device
@@ -300,13 +302,14 @@ impl Context {
                 .queue_submit(
                     self.gpu.graphics_queue,
                     &submit_infos,
-                    self.facade.command_buffer_complete_fences[self.current_frame],
+                    self.facade.command_buffer_complete_fences[self.sync_idx],
                 )
                 .expect("Failed to execute queue submit.");
         }
+        self.sync_idx = (self.sync_idx + 1) % self.facade.num_frames;
 
         let swapchains = [self.facade.swapchain];
-        let image_indices = [frame_idx as u32];
+        let image_indices = [self.frame_idx as u32];
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(&signal_semaphores)
@@ -350,36 +353,23 @@ impl Context {
                 _ => (),
             }
         }
-
-        self.current_frame = (self.current_frame + 1) % self.facade.num_frames;
     }
 
-    pub fn begin_pass(
-        &self,
-        graph_handle: GraphHandle,
-        pass_handle: PassHandle,
-        // TODO: Remove this param
-        frame_idx: usize,
-    ) {
+    pub fn begin_pass(&self, graph_handle: GraphHandle, pass_handle: PassHandle) {
         let (graph, _) = self
             .graph_cache
             .iter()
             .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
             .expect("Graph not found in cache. Have you called build_graph()?");
-        graph.begin_pass(pass_handle, self.command_buffers[frame_idx])
+        graph.begin_pass(pass_handle, self.command_buffers[self.frame_idx])
     }
 
-    pub fn end_pass(
-        &self,
-        graph_handle: GraphHandle,
-        // TODO: Remove this param
-        frame_idx: usize,
-    ) {
+    pub fn end_pass(&self, graph_handle: GraphHandle) {
         let (graph, _) = self
             .graph_cache
             .iter()
             .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
             .expect("Graph not found in cache. Have you called build_graph()?");
-        graph.end_pass(self.command_buffers[frame_idx]);
+        graph.end_pass(self.command_buffers[self.frame_idx]);
     }
 }

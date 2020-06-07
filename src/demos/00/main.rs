@@ -36,8 +36,7 @@ fn main() {
         .collect();
 
     loop {
-        let (is_running, frame_idx) = ctx.begin_frame();
-        if !is_running {
+        if !ctx.begin_frame() {
             break;
         }
 
@@ -68,24 +67,24 @@ fn main() {
             elapsed_seconds,
         }];
 
-        uniform_buffers[frame_idx].upload_data(&ubos, 0, &ctx.gpu);
+        uniform_buffers[ctx.frame_idx].upload_data(&ubos, 0, &ctx.gpu);
 
         // Build and execute render graph
         {
             let mut graph_builder = graphene::GraphBuilder::new();
             let pass_0 = graph_builder.add_pass(
                 "forward lit",
-                &vec![&ctx.facade.swapchain_textures[frame_idx]],
+                &vec![&ctx.facade.swapchain_textures[ctx.frame_idx]],
                 Some(&ctx.facade.depth_texture),
                 &ctx.shader_modules,
-                &uniform_buffers[frame_idx],
+                &uniform_buffers[ctx.frame_idx],
                 &environment_texture,
                 &environment_sampler,
             );
 
-            let cmd_buf = ctx.command_buffers[frame_idx];
+            let cmd_buf = ctx.command_buffers[ctx.frame_idx];
             let graph = ctx.build_graph(graph_builder);
-            ctx.begin_pass(graph, pass_0, frame_idx);
+            ctx.begin_pass(graph, pass_0);
             unsafe {
                 // Bind index and vertex buffers
                 {
@@ -111,10 +110,10 @@ fn main() {
                     0,
                 );
             }
-            ctx.end_pass(graph, frame_idx);
+            ctx.end_pass(graph);
         }
 
-        ctx.end_frame(frame_idx);
+        ctx.end_frame();
     }
 
     // TODO: Remove the necessity for this sync
