@@ -17,8 +17,8 @@ pub struct Context {
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
 
-    pub sync_idx: usize,  // Index of the synchronization primitives
-    pub frame_idx: usize, // Index of the swapchain frame
+    pub sync_idx: usize,      // Index of the synchronization primitives
+    pub swapchain_idx: usize, // Index of the swapchain frame
 
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
@@ -136,7 +136,7 @@ impl Context {
             command_pool,
 
             sync_idx: 0,
-            frame_idx: 0,
+            swapchain_idx: 0,
 
             _watcher: watcher,
             watch_rx,
@@ -258,13 +258,13 @@ impl Context {
             }
         }
 
-        self.frame_idx = opt_frame_idx.unwrap();
+        self.swapchain_idx = opt_frame_idx.unwrap();
 
         unsafe {
             self.gpu
                 .device
                 .reset_command_buffer(
-                    self.command_buffers[self.frame_idx],
+                    self.command_buffers[self.swapchain_idx],
                     vk::CommandBufferResetFlags::empty(),
                 )
                 .unwrap();
@@ -277,7 +277,7 @@ impl Context {
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.facade.image_available_semaphores[self.sync_idx]];
         let signal_semaphores = [self.facade.render_finished_semaphores[self.sync_idx]];
-        let command_buffers = [self.command_buffers[self.frame_idx as usize]];
+        let command_buffers = [self.command_buffers[self.swapchain_idx as usize]];
 
         let submit_infos = [vk::SubmitInfo {
             wait_semaphore_count: wait_semaphores.len() as u32,
@@ -309,7 +309,7 @@ impl Context {
         self.sync_idx = (self.sync_idx + 1) % self.facade.num_frames;
 
         let swapchains = [self.facade.swapchain];
-        let image_indices = [self.frame_idx as u32];
+        let image_indices = [self.swapchain_idx as u32];
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(&signal_semaphores)
@@ -361,7 +361,7 @@ impl Context {
             .iter()
             .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
             .expect("Graph not found in cache. Have you called build_graph()?");
-        graph.begin_pass(pass_handle, self.command_buffers[self.frame_idx])
+        graph.begin_pass(pass_handle, self.command_buffers[self.swapchain_idx])
     }
 
     pub fn end_pass(&self, graph_handle: GraphHandle) {
@@ -370,6 +370,6 @@ impl Context {
             .iter()
             .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
             .expect("Graph not found in cache. Have you called build_graph()?");
-        graph.end_pass(self.command_buffers[self.frame_idx]);
+        graph.end_pass(self.command_buffers[self.swapchain_idx]);
     }
 }

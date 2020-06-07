@@ -67,22 +67,22 @@ fn main() {
             elapsed_seconds,
         }];
 
-        uniform_buffers[ctx.frame_idx].upload_data(&ubos, 0, &ctx.gpu);
+        uniform_buffers[ctx.swapchain_idx].upload_data(&ubos, 0, &ctx.gpu);
 
         // Build and execute render graph
         {
             let mut graph_builder = graphene::GraphBuilder::new();
             let pass_0 = graph_builder.add_pass(
                 "forward lit",
-                &vec![&ctx.facade.swapchain_textures[ctx.frame_idx]],
+                &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
                 Some(&ctx.facade.depth_texture),
                 &ctx.shader_modules,
-                &uniform_buffers[ctx.frame_idx],
+                &uniform_buffers[ctx.swapchain_idx],
                 &environment_texture,
                 &environment_sampler,
             );
 
-            let cmd_buf = ctx.command_buffers[ctx.frame_idx];
+            let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
             let graph = ctx.build_graph(graph_builder);
             ctx.begin_pass(graph, pass_0);
             unsafe {
