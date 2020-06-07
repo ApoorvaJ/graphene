@@ -15,6 +15,7 @@ struct UniformBuffer {
 
 fn main() {
     let mut ctx = graphene::Context::new();
+    let start_instant = std::time::Instant::now();
     let uniform_buffer_size = std::mem::size_of::<UniformBuffer>();
 
     let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
@@ -35,7 +36,13 @@ fn main() {
         .collect();
 
     loop {
-        let (is_running, frame_idx, elapsed_seconds) = ctx.begin_frame();
+        let (is_running, frame_idx) = ctx.begin_frame();
+        if !is_running {
+            break;
+        }
+
+        let elapsed_seconds = start_instant.elapsed().as_secs_f32();
+
         // Update uniform buffer
         let mtx_model_to_world =
             Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
@@ -108,10 +115,6 @@ fn main() {
         }
 
         ctx.end_frame(frame_idx);
-
-        if !is_running {
-            break;
-        }
     }
 
     // TODO: Remove the necessity for this sync

@@ -1,6 +1,5 @@
 use crate::*;
 
-use glam::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
@@ -19,7 +18,6 @@ pub struct Context {
     pub command_pool: vk::CommandPool,
 
     pub current_frame: usize,
-    start_instant: std::time::Instant,
 
     _watcher: notify::RecommendedWatcher, // Need to keep this alive to keep the receiver alive
     watch_rx: std::sync::mpsc::Receiver<notify::DebouncedEvent>,
@@ -137,7 +135,6 @@ impl Context {
             command_pool,
 
             current_frame: 0,
-            start_instant: std::time::Instant::now(),
 
             _watcher: watcher,
             watch_rx,
@@ -172,7 +169,7 @@ impl Context {
         GraphHandle(req_hash)
     }
 
-    pub fn begin_frame(&mut self) -> (bool, usize, f32) {
+    pub fn begin_frame(&mut self) -> (bool, usize) {
         let mut is_running = true;
         let mut resize_needed = false;
         let viewport_width = self.facade.swapchain_textures[0].width;
@@ -261,8 +258,6 @@ impl Context {
 
         let frame_idx = opt_frame_idx.unwrap();
 
-        let elapsed_seconds = self.start_instant.elapsed().as_secs_f32();
-
         unsafe {
             self.gpu
                 .device
@@ -273,7 +268,7 @@ impl Context {
                 .unwrap();
         }
 
-        (is_running, frame_idx, elapsed_seconds)
+        (is_running, frame_idx)
     }
 
     pub fn end_frame(&mut self, frame_idx: usize) {
