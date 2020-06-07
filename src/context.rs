@@ -313,24 +313,17 @@ impl Context {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        // Present the queue
-        {
-            let result = unsafe {
-                self.facade
-                    .ext_swapchain
-                    .queue_present(self.gpu.present_queue, &present_info)
-            };
-
-            if let Err(error_code) = result {
-                match error_code {
-                    vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => {
-                        // Window is resized. Recreate the swapchain
-                        self.recreate_resolution_dependent_state();
-                    }
-                    _ => panic!("Failed to present queue."),
-                }
-            }
-        }
+        /* Present the queue */
+        // According to Vulkan spec, queue_present() can fail if a resize occurs.
+        // We handle this in begin_frame(), so we should be able to ignore failure here,
+        // if it does happen. This works fine, when tested on Windows and on Linux on an
+        // integrated GPU. If this fails on some other platform, consider calling
+        // recreate_resolution_dependent_state() on error.
+        let _ = unsafe {
+            self.facade
+                .ext_swapchain
+                .queue_present(self.gpu.present_queue, &present_info)
+        };
 
         for event in self.watch_rx.try_iter() {
             use notify::DebouncedEvent::*;
