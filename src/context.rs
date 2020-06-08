@@ -391,7 +391,7 @@ impl Context {
         buffer: &HostVisibleBuffer,
         texture_handle: TextureHandle,
         environment_sampler: &Sampler,
-    ) -> PassHandle {
+    ) -> Result<PassHandle, String> {
         // TODO: Assert that color and depth textures have the same resolution
         let outputs = output_texs
             .iter()
@@ -410,8 +410,17 @@ impl Context {
             .texture_list
             .iter()
             .find(|(_tex, handle)| texture_handle.0 == handle.0);
-        // TODO: Return a result instead of this unwrap, if texture doesn't exist in the texture list
-        let (tex, _tex_handle) = opt_tex.unwrap();
+
+        let (tex, _tex_handle) = {
+            if let Some((tex, _tex_handle)) = opt_tex {
+                (tex, _tex_handle)
+            } else {
+                return Err(format!(
+                    "Texture with handle `{}` not found.",
+                    texture_handle.0
+                ));
+            }
+        };
 
         graph_builder.passes.push(Pass {
             name: String::from(name),
@@ -429,7 +438,7 @@ impl Context {
             graph_builder.passes[graph_builder.passes.len() - 1].hash(&mut hasher);
             hasher.finish()
         };
-        PassHandle(pass_hash)
+        Ok(PassHandle(pass_hash))
     }
 }
 
@@ -442,7 +451,7 @@ impl Context {
         &mut self,
         name: &str,
         texture_type: TextureType,
-    ) -> Result<TextureHandle, ()> {
+    ) -> Result<TextureHandle, String> {
         let new_hash: u64 = {
             let mut hasher = DefaultHasher::new();
             name.hash(&mut hasher);
@@ -456,7 +465,10 @@ impl Context {
             .find(|(_tex, tex_handle)| tex_handle.0 == new_hash);
 
         if opt_existing.is_some() {
-            return Err(());
+            return Err(format!(
+                "A texture with the same name `{}` already exists in the context.",
+                name
+            ));
         }
 
         match texture_type {

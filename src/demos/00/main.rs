@@ -76,16 +76,18 @@ fn main() {
         // Build and execute render graph
         {
             let mut graph_builder = graphene::GraphBuilder::new();
-            let pass_0 = ctx.add_pass(
-                &mut graph_builder,
-                "forward lit",
-                &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
-                Some(&ctx.facade.depth_texture),
-                &ctx.shader_modules,
-                &uniform_buffers[ctx.swapchain_idx],
-                environment_texture,
-                &environment_sampler,
-            );
+            let pass_0 = ctx
+                .add_pass(
+                    &mut graph_builder,
+                    "forward lit",
+                    &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
+                    Some(&ctx.facade.depth_texture),
+                    &ctx.shader_modules,
+                    &uniform_buffers[ctx.swapchain_idx],
+                    environment_texture,
+                    &environment_sampler,
+                )
+                .unwrap();
 
             let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
             let graph = ctx.build_graph(graph_builder);
