@@ -20,11 +20,15 @@ fn main() {
 
     let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
     let environment_sampler = graphene::Sampler::new(&ctx.gpu);
-    let environment_texture = graphene::Texture::new_from_image(
-        std::path::Path::new("assets/textures/env_carpentry_shop_02_2k.jpg"),
-        &ctx.gpu,
-        ctx.command_pool,
-    );
+    let environment_texture = ctx
+        .new_texture(
+            "environment map",
+            graphene::TextureType::Image {
+                path: String::from("assets/textures/env_carpentry_shop_02_2k.jpg"),
+            },
+        )
+        .unwrap();
+
     let uniform_buffers: Vec<graphene::HostVisibleBuffer> = (0..ctx.facade.num_frames)
         .map(|_| {
             graphene::HostVisibleBuffer::new(
@@ -72,13 +76,14 @@ fn main() {
         // Build and execute render graph
         {
             let mut graph_builder = graphene::GraphBuilder::new();
-            let pass_0 = graph_builder.add_pass(
+            let pass_0 = ctx.add_pass(
+                &mut graph_builder,
                 "forward lit",
                 &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
                 Some(&ctx.facade.depth_texture),
                 &ctx.shader_modules,
                 &uniform_buffers[ctx.swapchain_idx],
-                &environment_texture,
+                environment_texture,
                 &environment_sampler,
             );
 

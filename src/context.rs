@@ -8,12 +8,17 @@ use winit::platform::desktop::EventLoopExtDesktop;
 
 #[derive(Copy, Clone)]
 pub struct GraphHandle(u64);
+#[derive(Copy, Clone)]
+pub struct TextureHandle(u64);
+#[derive(Copy, Clone)]
+pub struct PassHandle(u64);
 
 pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
 
-    graph_cache: Vec<(Graph, u64)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
+    texture_list: Vec<(Texture, TextureHandle)>,
+    graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
 
@@ -74,7 +79,7 @@ impl Context {
             winit::window::WindowBuilder::new()
                 .with_title(APP_NAME)
                 .with_inner_size(winit::dpi::LogicalSize::new(800, 600))
-                .with_maximized(true)
+                // .with_maximized(true)
                 .build(&event_loop)
                 .expect("Failed to create window.")
         };
@@ -131,6 +136,7 @@ impl Context {
             window,
             event_loop: event_loop,
 
+            texture_list: Vec::new(),
             graph_cache: Vec::new(),
             shader_modules,
             command_pool,
@@ -159,13 +165,15 @@ impl Context {
         let opt_idx = self
             .graph_cache
             .iter()
-            .position(|(_, cached_hash)| *cached_hash == req_hash);
+            .position(|(_, cached_hash)| cached_hash.0 == req_hash);
 
         if opt_idx.is_none() {
             // The requested graph doesn't exist. Build it and add it to the cache.
             println!("Adding graph to cache");
-            self.graph_cache
-                .push((Graph::new(graph_builder, &self.gpu.device), req_hash));
+            self.graph_cache.push((
+                Graph::new(graph_builder, &self.gpu.device),
+                GraphHandle(req_hash),
+            ));
         }
 
         GraphHandle(req_hash)
@@ -359,7 +367,7 @@ impl Context {
         let (graph, _) = self
             .graph_cache
             .iter()
-            .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
+            .find(|(_, cached_hash)| cached_hash.0 == graph_handle.0)
             .expect("Graph not found in cache. Have you called build_graph()?");
         graph.begin_pass(pass_handle, self.command_buffers[self.swapchain_idx])
     }
@@ -368,8 +376,100 @@ impl Context {
         let (graph, _) = self
             .graph_cache
             .iter()
-            .find(|(_, cached_hash)| *cached_hash == graph_handle.0)
+            .find(|(_, cached_hash)| cached_hash.0 == graph_handle.0)
             .expect("Graph not found in cache. Have you called build_graph()?");
         graph.end_pass(self.command_buffers[self.swapchain_idx]);
+    }
+
+    pub fn add_pass(
+        &self,
+        graph_builder: &mut GraphBuilder,
+        name: &str,
+        output_texs: &Vec<&Texture>,
+        opt_depth_tex: Option<&Texture>,
+        shader_modules: &Vec<vk::ShaderModule>,
+        buffer: &HostVisibleBuffer,
+        texture_handle: TextureHandle,
+        environment_sampler: &Sampler,
+    ) -> PassHandle {
+        // TODO: Assert that color and depth textures have the same resolution
+        let outputs = output_texs
+            .iter()
+            .map(|tex| (tex.image_view, tex.format))
+            .collect();
+        let opt_depth = opt_depth_tex.map(|depth_tex| (depth_tex.image_view, depth_tex.format));
+        let viewport_width = output_texs[0].width;
+        let viewport_height = output_texs[0].height;
+        let shader_modules = shader_modules
+            .iter()
+            .map(|shader_module| *shader_module)
+            .collect();
+
+        // Find the texture from the texture list
+        let opt_tex = self
+            .texture_list
+            .iter()
+            .find(|(_tex, handle)| texture_handle.0 == handle.0);
+        // TODO: Return a result instead of this unwrap, if texture doesn't exist in the texture list
+        let (tex, _tex_handle) = opt_tex.unwrap();
+
+        graph_builder.passes.push(Pass {
+            name: String::from(name),
+            outputs,
+            input_texture: (tex.image_view, environment_sampler.vk_sampler),
+            opt_depth,
+            viewport_width,
+            viewport_height,
+            buffer_info: (buffer.vk_buffer, buffer.size),
+            shader_modules,
+        });
+
+        let pass_hash: u64 = {
+            let mut hasher = DefaultHasher::new();
+            graph_builder.passes[graph_builder.passes.len() - 1].hash(&mut hasher);
+            hasher.finish()
+        };
+        PassHandle(pass_hash)
+    }
+}
+
+pub enum TextureType {
+    Image { path: String },
+}
+
+impl Context {
+    pub fn new_texture(
+        &mut self,
+        name: &str,
+        texture_type: TextureType,
+    ) -> Result<TextureHandle, ()> {
+        let new_hash: u64 = {
+            let mut hasher = DefaultHasher::new();
+            name.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        // Return an error if a texture with the same name exists
+        let opt_existing = self
+            .texture_list
+            .iter()
+            .find(|(_tex, tex_handle)| tex_handle.0 == new_hash);
+
+        if opt_existing.is_some() {
+            return Err(());
+        }
+
+        match texture_type {
+            TextureType::Image { path } => {
+                let tex = Texture::new_from_image(
+                    std::path::Path::new(&path),
+                    &self.gpu,
+                    self.command_pool,
+                );
+                self.texture_list.push((tex, TextureHandle(new_hash)));
+            }
+        }
+
+        Ok(TextureHandle(new_hash))
     }
 }

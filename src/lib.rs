@@ -6,7 +6,6 @@ pub mod buffer;
 pub use buffer::*;
 pub mod context;
 pub use context::*;
-pub use context::*;
 pub mod facade;
 pub use facade::*;
 pub mod gpu;
