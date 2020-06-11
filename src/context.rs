@@ -66,8 +66,23 @@ impl Context {
                 .device_wait_idle()
                 .expect("Failed to wait device idle x")
         };
+        // Recreate swapchain
         self.facade.destroy(&self.gpu);
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
+        // Recreate the textures which depend on the resolution of the swapchain
+        for i in 0..self.texture_list.len() {
+            let (tex, _) = &self.texture_list[i];
+            if let TextureSize::Relative { .. } = self.texture_list[i].0.size {
+                self.texture_list[i].0 = Texture::new(
+                    &self.gpu,
+                    &self.facade,
+                    tex.size,
+                    tex.format,
+                    tex.usage,
+                    tex.aspect_flags,
+                );
+            }
+        }
     }
 
     pub fn new() -> Context {
@@ -182,8 +197,9 @@ impl Context {
     pub fn begin_frame(&mut self) -> bool {
         let mut is_running = true;
         let mut resize_needed = false;
-        let viewport_width = self.facade.swapchain_textures[0].width;
-        let viewport_height = self.facade.swapchain_textures[0].height;
+
+        let swapchain_width = self.facade.swapchain_width;
+        let swapchain_height = self.facade.swapchain_height;
 
         self.event_loop.run_return(|event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
@@ -205,8 +221,8 @@ impl Context {
                         },
                     },
                     WindowEvent::Resized(physical_size) => {
-                        if viewport_width != physical_size.width
-                            || viewport_height != physical_size.height
+                        if swapchain_width != physical_size.width
+                            || swapchain_height != physical_size.height
                         {
                             resize_needed = true;
                         }
@@ -386,7 +402,7 @@ impl Context {
         graph_builder: &mut GraphBuilder,
         name: &str,
         output_texs: &Vec<&Texture>,
-        opt_depth_tex: Option<&Texture>,
+        opt_depth_tex: Option<TextureHandle>,
         shader_modules: &Vec<vk::ShaderModule>,
         buffer: &HostVisibleBuffer,
         texture_handle: TextureHandle,
@@ -397,29 +413,27 @@ impl Context {
             .iter()
             .map(|tex| (tex.image_view, tex.format))
             .collect();
-        let opt_depth = opt_depth_tex.map(|depth_tex| (depth_tex.image_view, depth_tex.format));
-        let viewport_width = output_texs[0].width;
-        let viewport_height = output_texs[0].height;
         let shader_modules = shader_modules
             .iter()
             .map(|shader_module| *shader_module)
             .collect();
 
-        // Find the texture from the texture list
-        let opt_tex = self
-            .texture_list
-            .iter()
-            .find(|(_tex, handle)| texture_handle.0 == handle.0);
-
-        let (tex, _tex_handle) = {
-            if let Some((tex, _tex_handle)) = opt_tex {
-                (tex, _tex_handle)
-            } else {
-                return Err(format!(
-                    "Texture with handle `{}` not found in the context.",
-                    texture_handle.0
+        let tex = self
+            .get_texture_from_hash(texture_handle.0)
+            .expect(&format!(
+                "Texture with handle `{}` not found in the context.",
+                texture_handle.0
+            ));
+        let opt_depth = if let Some(depth_tex_handle) = opt_depth_tex {
+            let depth_tex = self
+                .get_texture_from_hash(depth_tex_handle.0)
+                .expect(&format!(
+                    "Depth texture with handle `{}` not found in the context.",
+                    depth_tex_handle.0
                 ));
-            }
+            Some((depth_tex.image_view, depth_tex.format))
+        } else {
+            None
         };
 
         graph_builder.passes.push(Pass {
@@ -427,8 +441,8 @@ impl Context {
             outputs,
             input_texture: (tex.image_view, environment_sampler.vk_sampler),
             opt_depth,
-            viewport_width,
-            viewport_height,
+            viewport_width: self.facade.swapchain_width,
+            viewport_height: self.facade.swapchain_height,
             buffer_info: (buffer.vk_buffer, buffer.size),
             shader_modules,
         });
@@ -442,33 +456,82 @@ impl Context {
     }
 }
 
+/* Textures */
+
 impl Context {
-    pub fn new_texture_from_file(
+    fn get_texture_from_hash(&self, hash: u64) -> Option<&Texture> {
+        let opt_texture_and_handle = self
+            .texture_list
+            .iter()
+            .find(|(_tex, tex_handle)| tex_handle.0 == hash);
+
+        if let Some((tex, _handle)) = opt_texture_and_handle {
+            return Some(tex);
+        }
+
+        return None;
+    }
+
+    pub fn new_texture_relative_size(
         &mut self,
         name: &str,
-        path: &str,
+        scale: f32,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        aspect_flags: vk::ImageAspectFlags,
     ) -> Result<TextureHandle, String> {
+        // Hash texture name
         let new_hash: u64 = {
             let mut hasher = DefaultHasher::new();
             name.hash(&mut hasher);
             hasher.finish()
         };
-
-        // Return an error if a texture with the same name exists
-        let opt_existing = self
-            .texture_list
-            .iter()
-            .find(|(_tex, tex_handle)| tex_handle.0 == new_hash);
-
-        if opt_existing.is_some() {
+        // If texture with same hash already exists, return error
+        if self.get_texture_from_hash(new_hash).is_some() {
             return Err(format!(
                 "A texture with the same name `{}` already exists in the context.",
                 name
             ));
         }
+        // Create new texture
+        let tex = Texture::new(
+            &self.gpu,
+            &self.facade,
+            TextureSize::Relative { scale },
+            format,
+            usage,
+            aspect_flags,
+        );
+        self.texture_list.push((tex, TextureHandle(new_hash)));
 
-        let tex =
-            Texture::new_from_image(std::path::Path::new(&path), &self.gpu, self.command_pool);
+        Ok(TextureHandle(new_hash))
+    }
+
+    pub fn new_texture_from_file(
+        &mut self,
+        name: &str,
+        path: &str,
+    ) -> Result<TextureHandle, String> {
+        // Hash texture name
+        let new_hash: u64 = {
+            let mut hasher = DefaultHasher::new();
+            name.hash(&mut hasher);
+            hasher.finish()
+        };
+        // If texture with same hash already exists, return error
+        if self.get_texture_from_hash(new_hash).is_some() {
+            return Err(format!(
+                "A texture with the same name `{}` already exists in the context.",
+                name
+            ));
+        }
+        // Create new texture
+        let tex = Texture::new_from_image(
+            &self.gpu,
+            &self.facade,
+            std::path::Path::new(&path),
+            self.command_pool,
+        );
         self.texture_list.push((tex, TextureHandle(new_hash)));
 
         Ok(TextureHandle(new_hash))

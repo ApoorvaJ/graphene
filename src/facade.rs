@@ -6,9 +6,10 @@ pub struct Facade {
     pub surface_formats: Vec<vk::SurfaceFormatKHR>,
     // Swapchain
     pub num_frames: usize,
+    pub swapchain_width: u32,
+    pub swapchain_height: u32,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_textures: Vec<Texture>, // Color textures that are presented to the screen
-    pub depth_texture: Texture, // TODO: Move this to the user code, since there can be arbitrarily many depth buffers - shadowmaps, depth prepass, hi-z, etc.
     // Synchronization primitives. These aren't really resolution-dependent
     // and could technically be moved outside the struct. They are kept here
     // because they're closely related to the rest of the members.
@@ -158,9 +159,10 @@ impl Facade {
         let swapchain_textures = (0..num_frames)
             .map(|i| {
                 Texture {
-                    width: swapchain_extent.width,
-                    height: swapchain_extent.height,
+                    size: TextureSize::Relative { scale: 1.0 },
                     format: swapchain_format,
+                    usage: vk::ImageUsageFlags::empty(),
+                    aspect_flags: vk::ImageAspectFlags::empty(),
                     image: swapchain_images[i as usize],
                     image_view: swapchain_imageviews[i as usize],
                     opt_device_memory: None, // This memory is not allocated by us. It is part of the swapchain.
@@ -168,21 +170,6 @@ impl Facade {
                 }
             })
             .collect();
-
-        // # Create depth buffer
-        let depth_texture = {
-            let depth_format = vk::Format::D32_SFLOAT;
-            let depth_texture = Texture::new(
-                &gpu,
-                swapchain_extent.width,
-                swapchain_extent.height,
-                depth_format,
-                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                vk::ImageAspectFlags::DEPTH,
-            );
-
-            depth_texture
-        };
 
         // # Synchronization primitives
         let (
@@ -227,9 +214,10 @@ impl Facade {
             surface_caps,
             surface_formats,
             num_frames: num_frames as usize,
+            swapchain_width: swapchain_extent.width,
+            swapchain_height: swapchain_extent.height,
             swapchain,
             swapchain_textures,
-            depth_texture,
             image_available_semaphores,
             render_finished_semaphores,
             command_buffer_complete_fences,

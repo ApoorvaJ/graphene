@@ -1,9 +1,15 @@
 use crate::*;
 
+#[derive(Copy, Clone)]
+pub enum TextureSize {
+    Absolute { width: u32, height: u32 }, // Number of pixels
+    Relative { scale: f32 },              // Scale relative to the swapchain size
+}
 pub struct Texture {
-    pub width: u32,
-    pub height: u32,
+    pub size: TextureSize,
     pub format: vk::Format,
+    pub usage: vk::ImageUsageFlags,
+    pub aspect_flags: vk::ImageAspectFlags,
     pub image: vk::Image,
     pub image_view: vk::ImageView,
     pub opt_device_memory: Option<vk::DeviceMemory>, // None if we didn't manually allocate memory, e.g. in the case of swapchain images
@@ -25,13 +31,22 @@ impl Drop for Texture {
 impl Texture {
     pub fn new(
         gpu: &Gpu,
-        width: u32,
-        height: u32,
+        facade: &Facade,
+        size: TextureSize,
         format: vk::Format,
         usage: vk::ImageUsageFlags,
         aspect_flags: vk::ImageAspectFlags,
     ) -> Texture {
         let device = gpu.device.clone();
+
+        let (width, height) = match size {
+            TextureSize::Absolute { width, height } => (width, height),
+            TextureSize::Relative { scale } => (
+                (facade.swapchain_width as f32 * scale) as u32,
+                (facade.swapchain_height as f32 * scale) as u32,
+            ),
+        };
+
         let image_create_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
@@ -103,9 +118,10 @@ impl Texture {
         };
 
         Texture {
+            size,
             format,
-            width,
-            height,
+            usage,
+            aspect_flags,
             image,
             image_view,
             opt_device_memory: Some(device_memory),
@@ -182,8 +198,9 @@ impl Texture {
     }
 
     pub fn new_from_image(
-        path: &std::path::Path,
         gpu: &Gpu,
+        facade: &Facade,
+        path: &std::path::Path,
         command_pool: vk::CommandPool,
     ) -> Texture {
         use image::GenericImageView;
@@ -201,8 +218,11 @@ impl Texture {
 
         let texture = Texture::new(
             gpu,
-            image_width,
-            image_height,
+            facade,
+            TextureSize::Absolute {
+                width: image_width,
+                height: image_height,
+            },
             vk::Format::R8G8B8A8_UNORM, // TODO: Derive format from file or take as an argument
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             vk::ImageAspectFlags::COLOR,

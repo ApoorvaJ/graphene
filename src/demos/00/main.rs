@@ -19,6 +19,15 @@ fn main() {
     let uniform_buffer_size = std::mem::size_of::<UniformBuffer>();
 
     let mesh = graphene::Mesh::load("assets/meshes/sphere.glb", &ctx.gpu, ctx.command_pool);
+    let depth_texture = ctx
+        .new_texture_relative_size(
+            "depth",
+            1.0,
+            vk::Format::D32_SFLOAT,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::ImageAspectFlags::DEPTH,
+        )
+        .unwrap();
     let environment_sampler = graphene::Sampler::new(&ctx.gpu);
     let environment_texture = ctx
         .new_texture_from_file(
@@ -51,8 +60,8 @@ fn main() {
         let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
             * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
         let mtx_view_to_clip = {
-            let width = ctx.facade.swapchain_textures[0].width;
-            let height = ctx.facade.swapchain_textures[0].height;
+            let width = ctx.facade.swapchain_width;
+            let height = ctx.facade.swapchain_height;
             Mat4::perspective_lh(
                 60.0 * DEGREES_TO_RADIANS,
                 width as f32 / height as f32,
@@ -79,7 +88,7 @@ fn main() {
                     &mut graph_builder,
                     "forward lit",
                     &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
-                    Some(&ctx.facade.depth_texture),
+                    Some(depth_texture),
                     &ctx.shader_modules,
                     &uniform_buffers[ctx.swapchain_idx],
                     environment_texture,
