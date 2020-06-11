@@ -1,12 +1,8 @@
 use crate::*;
 
-#[derive(Copy, Clone)]
-pub enum TextureSize {
-    Absolute { width: u32, height: u32 }, // Number of pixels
-    Relative { scale: f32 },              // Scale relative to the swapchain size
-}
 pub struct Texture {
-    pub size: TextureSize,
+    pub width: u32,
+    pub height: u32,
     pub format: vk::Format,
     pub usage: vk::ImageUsageFlags,
     pub aspect_flags: vk::ImageAspectFlags,
@@ -31,21 +27,13 @@ impl Drop for Texture {
 impl Texture {
     pub fn new(
         gpu: &Gpu,
-        facade: &Facade,
-        size: TextureSize,
+        width: u32,
+        height: u32,
         format: vk::Format,
         usage: vk::ImageUsageFlags,
         aspect_flags: vk::ImageAspectFlags,
     ) -> Texture {
         let device = gpu.device.clone();
-
-        let (width, height) = match size {
-            TextureSize::Absolute { width, height } => (width, height),
-            TextureSize::Relative { scale } => (
-                (facade.swapchain_width as f32 * scale) as u32,
-                (facade.swapchain_height as f32 * scale) as u32,
-            ),
-        };
 
         let image_create_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
@@ -118,7 +106,8 @@ impl Texture {
         };
 
         Texture {
-            size,
+            width,
+            height,
             format,
             usage,
             aspect_flags,
@@ -199,7 +188,6 @@ impl Texture {
 
     pub fn new_from_image(
         gpu: &Gpu,
-        facade: &Facade,
         path: &std::path::Path,
         command_pool: vk::CommandPool,
     ) -> Texture {
@@ -218,11 +206,8 @@ impl Texture {
 
         let texture = Texture::new(
             gpu,
-            facade,
-            TextureSize::Absolute {
-                width: image_width,
-                height: image_height,
-            },
+            image_width,
+            image_height,
             vk::Format::R8G8B8A8_UNORM, // TODO: Derive format from file or take as an argument
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             vk::ImageAspectFlags::COLOR,

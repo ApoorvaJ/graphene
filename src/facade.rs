@@ -159,7 +159,8 @@ impl Facade {
         let swapchain_textures = (0..num_frames)
             .map(|i| {
                 Texture {
-                    size: TextureSize::Relative { scale: 1.0 },
+                    width: swapchain_extent.width,
+                    height: swapchain_extent.height,
                     format: swapchain_format,
                     usage: vk::ImageUsageFlags::empty(),
                     aspect_flags: vk::ImageAspectFlags::empty(),

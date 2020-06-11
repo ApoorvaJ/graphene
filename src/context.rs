@@ -13,11 +13,17 @@ pub struct TextureHandle(u64);
 #[derive(Copy, Clone)]
 pub struct PassHandle(u64);
 
+#[derive(Copy, Clone)]
+pub enum TextureSize {
+    Absolute,                // Number of pixels
+    Relative { scale: f32 }, // Scale relative to the swapchain size
+}
+
 pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
 
-    texture_list: Vec<(Texture, TextureHandle)>,
+    texture_list: Vec<(TextureHandle, Texture, TextureSize)>,
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
@@ -71,16 +77,12 @@ impl Context {
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
         // Recreate the textures which depend on the resolution of the swapchain
         for i in 0..self.texture_list.len() {
-            let (tex, _) = &self.texture_list[i];
-            if let TextureSize::Relative { .. } = self.texture_list[i].0.size {
-                self.texture_list[i].0 = Texture::new(
-                    &self.gpu,
-                    &self.facade,
-                    tex.size,
-                    tex.format,
-                    tex.usage,
-                    tex.aspect_flags,
-                );
+            let (_, tex, _) = &self.texture_list[i];
+            if let TextureSize::Relative { scale } = self.texture_list[i].2 {
+                let w = (self.facade.swapchain_width as f32 * scale) as u32;
+                let h = (self.facade.swapchain_height as f32 * scale) as u32;
+                self.texture_list[i].1 =
+                    Texture::new(&self.gpu, w, h, tex.format, tex.usage, tex.aspect_flags);
             }
         }
     }
@@ -463,9 +465,9 @@ impl Context {
         let opt_texture_and_handle = self
             .texture_list
             .iter()
-            .find(|(_tex, tex_handle)| tex_handle.0 == hash);
+            .find(|(tex_handle, _, _)| tex_handle.0 == hash);
 
-        if let Some((tex, _handle)) = opt_texture_and_handle {
+        if let Some((_, tex, _)) = opt_texture_and_handle {
             return Some(tex);
         }
 
@@ -494,15 +496,14 @@ impl Context {
             ));
         }
         // Create new texture
-        let tex = Texture::new(
-            &self.gpu,
-            &self.facade,
+        let w = (self.facade.swapchain_width as f32 * scale) as u32;
+        let h = (self.facade.swapchain_height as f32 * scale) as u32;
+        let tex = Texture::new(&self.gpu, w, h, format, usage, aspect_flags);
+        self.texture_list.push((
+            TextureHandle(new_hash),
+            tex,
             TextureSize::Relative { scale },
-            format,
-            usage,
-            aspect_flags,
-        );
-        self.texture_list.push((tex, TextureHandle(new_hash)));
+        ));
 
         Ok(TextureHandle(new_hash))
     }
@@ -526,13 +527,10 @@ impl Context {
             ));
         }
         // Create new texture
-        let tex = Texture::new_from_image(
-            &self.gpu,
-            &self.facade,
-            std::path::Path::new(&path),
-            self.command_pool,
-        );
-        self.texture_list.push((tex, TextureHandle(new_hash)));
+        let tex =
+            Texture::new_from_image(&self.gpu, std::path::Path::new(&path), self.command_pool);
+        self.texture_list
+            .push((TextureHandle(new_hash), tex, TextureSize::Absolute));
 
         Ok(TextureHandle(new_hash))
     }
