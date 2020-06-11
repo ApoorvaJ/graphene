@@ -22,8 +22,8 @@ vec3 f_schlick(vec3 f0, float f90, float u) {
 void main() {
     vec3 n = normalize(frag_norm_vs);
 
-    float roughness = cos(ubo.elapsed_seconds) * 0.5 + 0.5;
-    // float roughness = 1.0;
+    // float roughness = cos(ubo.elapsed_seconds) * 0.5 + 0.5;
+    float roughness = 1.0;
     roughness = clamp(roughness * roughness, 1e-5, 1.0);
     vec3 v = vec3(0, 0, -1);
     // vec3 v = -normalize(frag_pos_vs);
@@ -37,7 +37,7 @@ void main() {
     );
     vec3 final = vec3(0, 0, 0);
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 1; i++) {
 
         vec3 h = normalize(v + lights[i]);
 
@@ -80,7 +80,7 @@ void main() {
         }
 
         vec3 f_r = d_ggx * v_ggx * fresnel_specular;
-        vec3 diffuse_color = vec3(0.0, 0.6, 3.0);
+        vec3 diffuse_color = vec3(1.0, 1.0, 1.0);
         vec3 f_d = diffuse_disney * diffuse_color;
 
         final += intensities[i] * n_dot_l * (f_r + f_d);

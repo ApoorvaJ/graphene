@@ -416,7 +416,7 @@ impl Context {
                 (tex, _tex_handle)
             } else {
                 return Err(format!(
-                    "Texture with handle `{}` not found.",
+                    "Texture with handle `{}` not found in the context.",
                     texture_handle.0
                 ));
             }
@@ -442,15 +442,11 @@ impl Context {
     }
 }
 
-pub enum TextureType {
-    Image { path: String },
-}
-
 impl Context {
-    pub fn new_texture(
+    pub fn new_texture_from_file(
         &mut self,
         name: &str,
-        texture_type: TextureType,
+        path: &str,
     ) -> Result<TextureHandle, String> {
         let new_hash: u64 = {
             let mut hasher = DefaultHasher::new();
@@ -471,16 +467,9 @@ impl Context {
             ));
         }
 
-        match texture_type {
-            TextureType::Image { path } => {
-                let tex = Texture::new_from_image(
-                    std::path::Path::new(&path),
-                    &self.gpu,
-                    self.command_pool,
-                );
-                self.texture_list.push((tex, TextureHandle(new_hash)));
-            }
-        }
+        let tex =
+            Texture::new_from_image(std::path::Path::new(&path), &self.gpu, self.command_pool);
+        self.texture_list.push((tex, TextureHandle(new_hash)));
 
         Ok(TextureHandle(new_hash))
     }

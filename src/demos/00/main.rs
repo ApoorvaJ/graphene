@@ -18,14 +18,12 @@ fn main() {
     let start_instant = std::time::Instant::now();
     let uniform_buffer_size = std::mem::size_of::<UniformBuffer>();
 
-    let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
+    let mesh = graphene::Mesh::load("assets/meshes/sphere.glb", &ctx.gpu, ctx.command_pool);
     let environment_sampler = graphene::Sampler::new(&ctx.gpu);
     let environment_texture = ctx
-        .new_texture(
+        .new_texture_from_file(
             "environment map",
-            graphene::TextureType::Image {
-                path: String::from("assets/textures/env_carpentry_shop_02_2k.jpg"),
-            },
+            "assets/textures/env_carpentry_shop_02_2k.jpg",
         )
         .unwrap();
 
