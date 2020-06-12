@@ -101,8 +101,8 @@ impl Context {
                 .expect("Failed to create window.")
         };
 
-        let basis = Basis::new(APP_NAME, &window);
-        let gpu = Gpu::new(&basis);
+        let mut basis = Basis::new(APP_NAME, &window);
+        let gpu = Gpu::new(&mut basis);
 
         // # Create command pool
         let command_pool = {

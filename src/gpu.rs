@@ -25,8 +25,8 @@ impl Drop for Gpu {
 }
 
 impl Gpu {
-    pub fn new(basis: &Basis) -> Gpu {
-        let device_extensions = vec![String::from("VK_KHR_swapchain")];
+    pub fn new(basis: &mut Basis) -> Gpu {
+        let required_exts = vec![String::from("VK_KHR_swapchain")];
 
         // # Enumerate eligible GPUs
         struct CandidateGpu {
@@ -62,10 +62,10 @@ impl Gpu {
                         .map(|&ext| vk_to_string(&ext.extension_name))
                         .collect();
 
-                    device_extensions.iter().all(|required_ext| {
+                    required_exts.iter().all(|desired_ext| {
                         available_exts
                             .iter()
-                            .any(|available_ext| required_ext == available_ext)
+                            .any(|available_ext| desired_ext == available_ext)
                     })
                 };
                 if !are_exts_supported {
@@ -146,7 +146,7 @@ impl Gpu {
         // # Create a logical device, queues, the command pool, sync primitives, and the final gpu struct
         let gpu = {
             // Pick the most eligible of the candidate GPU.
-            // Currently, we just pick the first one. Winner winner chicken dinner!
+            // Currently, we just pick the first one.
             // TODO: Might want to pick the most powerful GPU in the future.
             let cgpu = candidate_gpus
                 .first()
@@ -176,7 +176,7 @@ impl Gpu {
                 ..Default::default()
             };
 
-            let raw_ext_names: Vec<CString> = device_extensions
+            let raw_ext_names: Vec<CString> = required_exts
                 .iter()
                 .map(|ext| CString::new(ext.to_string()).unwrap())
                 .collect();
@@ -191,7 +191,7 @@ impl Gpu {
                 p_queue_create_infos: queue_create_infos.as_ptr(),
                 enabled_layer_count: 0,
                 pp_enabled_layer_names: ptr::null(),
-                enabled_extension_count: device_extensions.len() as u32,
+                enabled_extension_count: required_exts.len() as u32,
                 pp_enabled_extension_names: ext_names.as_ptr(),
                 p_enabled_features: &physical_device_features,
             };
@@ -219,6 +219,26 @@ impl Gpu {
                 present_queue,
             }
         };
+
+        // If the debug marker extension is supported, enable it so we can have nice markers in RenderDoc
+        {
+            let exts = unsafe {
+                basis
+                    .instance
+                    .enumerate_device_extension_properties(gpu.physical_device)
+                    .expect("Failed to get device extension properties.")
+            };
+            // Are desired extensions supported?
+            let is_debug_marker_supported = exts.iter().any(|&ext| {
+                vk_to_string(&ext.extension_name) == String::from("VK_EXT_debug_marker")
+            });
+            if is_debug_marker_supported {
+                basis.opt_ext_debug_marker = Some(ash::extensions::ext::DebugMarker::new(
+                    &basis.instance,
+                    &gpu.device,
+                ));
+            }
+        }
 
         gpu
     }
