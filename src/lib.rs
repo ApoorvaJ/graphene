@@ -6,6 +6,8 @@ pub mod buffer;
 pub use buffer::*;
 pub mod context;
 pub use context::*;
+pub mod debug_marker;
+pub use debug_marker::*;
 pub mod facade;
 pub use facade::*;
 pub mod gpu;

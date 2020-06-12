@@ -14,7 +14,6 @@ pub struct Basis {
     // - Extensions
     pub ext_debug_utils: ash::extensions::ext::DebugUtils,
     pub ext_surface: ash::extensions::khr::Surface,
-    pub opt_ext_debug_marker: Option<ash::extensions::ext::DebugMarker>,
 }
 
 impl Drop for Basis {
@@ -140,7 +139,6 @@ impl Basis {
             _entry: entry,
             ext_debug_utils,
             ext_surface,
-            opt_ext_debug_marker: None,
         }
     }
 }

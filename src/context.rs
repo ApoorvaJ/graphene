@@ -36,6 +36,7 @@ pub struct Context {
 
     pub command_buffers: Vec<vk::CommandBuffer>,
     pub facade: Facade, // Resolution-dependent apparatus
+    pub debug_marker: DebugMarker,
     pub gpu: Gpu,
     pub basis: Basis,
 }
@@ -101,8 +102,9 @@ impl Context {
                 .expect("Failed to create window.")
         };
 
-        let mut basis = Basis::new(APP_NAME, &window);
-        let gpu = Gpu::new(&mut basis);
+        let basis = Basis::new(APP_NAME, &window);
+        let gpu = Gpu::new(&basis);
+        let debug_marker = DebugMarker::new(&basis, &gpu);
 
         // # Create command pool
         let command_pool = {
@@ -166,6 +168,7 @@ impl Context {
 
             command_buffers,
             facade,
+            debug_marker,
             gpu,
             basis,
         }

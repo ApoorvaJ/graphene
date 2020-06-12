@@ -4,7 +4,7 @@ use std::os::raw::c_char;
 pub struct Gpu {
     // Physical device
     pub physical_device: vk::PhysicalDevice,
-    pub _exts: Vec<vk::ExtensionProperties>,
+    pub exts: Vec<vk::ExtensionProperties>,
     pub present_modes: Vec<vk::PresentModeKHR>,
     pub memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub _properties: vk::PhysicalDeviceProperties,
@@ -25,7 +25,7 @@ impl Drop for Gpu {
 }
 
 impl Gpu {
-    pub fn new(basis: &mut Basis) -> Gpu {
+    pub fn new(basis: &Basis) -> Gpu {
         let required_exts = vec![String::from("VK_KHR_swapchain")];
 
         // # Enumerate eligible GPUs
@@ -208,7 +208,7 @@ impl Gpu {
 
             Gpu {
                 physical_device: cgpu.physical_device,
-                _exts: cgpu.exts.clone(),
+                exts: cgpu.exts.clone(),
                 present_modes: cgpu.present_modes.clone(),
                 memory_properties: cgpu.memory_properties,
                 _properties: cgpu.properties,
@@ -219,26 +219,6 @@ impl Gpu {
                 present_queue,
             }
         };
-
-        // If the debug marker extension is supported, enable it so we can have nice markers in RenderDoc
-        {
-            let exts = unsafe {
-                basis
-                    .instance
-                    .enumerate_device_extension_properties(gpu.physical_device)
-                    .expect("Failed to get device extension properties.")
-            };
-            // Are desired extensions supported?
-            let is_debug_marker_supported = exts.iter().any(|&ext| {
-                vk_to_string(&ext.extension_name) == String::from("VK_EXT_debug_marker")
-            });
-            if is_debug_marker_supported {
-                basis.opt_ext_debug_marker = Some(ash::extensions::ext::DebugMarker::new(
-                    &basis.instance,
-                    &gpu.device,
-                ));
-            }
-        }
 
         gpu
     }
