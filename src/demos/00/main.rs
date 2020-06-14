@@ -18,7 +18,7 @@ fn main() {
     let start_instant = std::time::Instant::now();
     let uniform_buffer_size = std::mem::size_of::<UniformBuffer>();
 
-    let mesh = graphene::Mesh::load("assets/meshes/sphere.glb", &ctx.gpu, ctx.command_pool);
+    let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
     let depth_texture = ctx
         .new_texture_relative_size(
             "depth",
@@ -39,7 +39,7 @@ fn main() {
     let uniform_buffers: Vec<graphene::HostVisibleBuffer> = (0..ctx.facade.num_frames)
         .map(|_| {
             graphene::HostVisibleBuffer::new(
-                uniform_buffer_size as u64,
+                uniform_buffer_size,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 &ctx.gpu,
             )

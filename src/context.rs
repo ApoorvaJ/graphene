@@ -7,11 +7,13 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
 #[derive(Copy, Clone)]
+pub struct BufferHandle(u64);
+#[derive(Copy, Clone)]
 pub struct GraphHandle(u64);
 #[derive(Copy, Clone)]
-pub struct TextureHandle(u64);
-#[derive(Copy, Clone)]
 pub struct PassHandle(u64);
+#[derive(Copy, Clone)]
+pub struct TextureHandle(u64);
 
 #[derive(Copy, Clone)]
 pub enum TextureSize {
@@ -24,6 +26,7 @@ pub struct Context {
     event_loop: winit::event_loop::EventLoop<()>,
 
     texture_list: Vec<(TextureHandle, Texture, TextureSize)>,
+    buffer_list: Vec<(BufferHandle, HostVisibleBuffer)>,
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
@@ -156,6 +159,7 @@ impl Context {
             event_loop: event_loop,
 
             texture_list: Vec::new(),
+            buffer_list: Vec::new(),
             graph_cache: Vec::new(),
             shader_modules,
             command_pool,
@@ -448,7 +452,7 @@ impl Context {
             opt_depth,
             viewport_width: self.facade.swapchain_width,
             viewport_height: self.facade.swapchain_height,
-            buffer_info: (buffer.vk_buffer, buffer.size),
+            buffer_info: (buffer.vk_buffer, buffer.size as u64),
             shader_modules,
         });
 
@@ -536,5 +540,41 @@ impl Context {
             .push((TextureHandle(new_hash), tex, TextureSize::Absolute));
 
         Ok(TextureHandle(new_hash))
+    }
+}
+
+/* Buffers */
+
+impl Context {
+    fn get_buffer_from_hash(&self, hash: u64) -> Option<&HostVisibleBuffer> {
+        let opt_buffer_and_handle = self
+            .buffer_list
+            .iter()
+            .find(|(buffer_handle, _)| buffer_handle.0 == hash);
+
+        if let Some((_, buffer)) = opt_buffer_and_handle {
+            return Some(buffer);
+        }
+
+        return None;
+    }
+
+    pub fn new_buffer(&mut self, name: &str, size: usize) -> Result<BufferHandle, String> {
+        // Hash buffer name
+        let new_hash: u64 = {
+            let mut hasher = DefaultHasher::new();
+            name.hash(&mut hasher);
+            hasher.finish()
+        };
+        // If buffer with same hash already exists, return error
+        if self.get_buffer_from_hash(new_hash).is_some() {
+            return Err(format!(
+                "A texture with the same name `{}` already exists in the context.",
+                name
+            ));
+        }
+        let buffer = HostVisibleBuffer::new(size, vk::BufferUsageFlags::UNIFORM_BUFFER, &self.gpu);
+        self.buffer_list.push((BufferHandle(new_hash), buffer));
+        Ok(BufferHandle(new_hash))
     }
 }

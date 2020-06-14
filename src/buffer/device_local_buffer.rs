@@ -23,7 +23,7 @@ impl DeviceLocalBuffer {
         gpu: &Gpu,
         command_pool: vk::CommandPool,
     ) -> DeviceLocalBuffer {
-        let size = std::mem::size_of_val(data) as u64;
+        let size = std::mem::size_of_val(data);
 
         // ## Create staging buffer in host-visible memory
         let staging_buffer = HostVisibleBuffer::new(size, vk::BufferUsageFlags::TRANSFER_SRC, &gpu);
@@ -47,7 +47,7 @@ impl DeviceLocalBuffer {
                 let copy_regions = [vk::BufferCopy {
                     src_offset: 0,
                     dst_offset: 0,
-                    size: size,
+                    size: size as u64,
                 }];
 
                 gpu.device.cmd_copy_buffer(

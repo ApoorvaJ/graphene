@@ -197,7 +197,7 @@ impl Texture {
 
         let (image_width, image_height) = (image_object.width(), image_object.height());
         let image_size =
-            (std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
+            std::mem::size_of::<u8>() * image_width as usize * image_height as usize * 4;
         let image_data = image_object.to_rgba().into_raw();
 
         if image_size <= 0 {

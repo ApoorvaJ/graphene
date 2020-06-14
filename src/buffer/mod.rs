@@ -6,7 +6,7 @@ pub mod host_visible_buffer;
 pub use host_visible_buffer::*;
 
 fn new_raw_buffer(
-    size: u64,
+    size: usize,
     usage: vk::BufferUsageFlags,
     required_memory_properties: vk::MemoryPropertyFlags,
     gpu: &Gpu,
