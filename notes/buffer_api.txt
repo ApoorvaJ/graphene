@@ -1,0 +1,79 @@
+let mut ctx = graphene::Context::new();
+
+let depth_texture = ctx
+    .new_texture_relative_size(
+        "depth",
+        1.0,
+        vk::Format::D32_SFLOAT,
+        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+        vk::ImageAspectFlags::DEPTH,
+    )
+    .unwrap();
+let environment_sampler = graphene::Sampler::new(&ctx.gpu);
+let environment_texture = ctx
+    .new_texture_from_file(
+        "environment map",
+        "assets/textures/env.jpg",
+    )
+    .unwrap();
+
+let uniform_buffer = ctx
+    .new_buffer(
+        "lit pass uniform buffer",
+        std::mem::size_of::<UniformBuffer>()
+    ).unwrap();
+
+loop {
+
+    if !ctx.begin_frame() {
+        break;
+    }
+
+    // Build and execute render graph
+    let mut graph_builder = graphene::GraphBuilder::new();
+    let pass_0 = ctx
+        .add_pass(
+            &mut graph_builder,
+            "forward lit",
+            &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
+            Some(depth_texture),
+            &ctx.shader_modules,
+            &uniform_buffer,
+            environment_texture,
+            &environment_sampler,
+        )
+        .unwrap();
+
+    let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
+    let graph = ctx.build_graph(graph_builder);
+    ctx.begin_pass(graph, pass_0);
+    {
+        let ubo = UniformBuffer {
+            // ...
+        };
+
+        // TODO: Ensure that begin_pass() has been called.
+        ctx.upload_to_buffer(uniform_buffer, &ubo);
+        uniform_buffers[ctx.swapchain_idx].upload_data(&ubos, 0, &ctx.gpu);
+
+        unsafe {
+            // Bind index and vertex buffers
+            // ...
+
+            ctx.gpu.device.cmd_draw_indexed(
+                // ...
+            );
+        }
+    }
+    ctx.end_pass(graph);
+
+    ctx.end_frame();
+}
+
+// TODO: Remove the necessity for this sync
+unsafe {
+    ctx.gpu
+        .device
+        .device_wait_idle()
+        .expect("Failed to wait device idle!");
+}
