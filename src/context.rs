@@ -74,7 +74,7 @@ impl Context {
             self.gpu
                 .device
                 .device_wait_idle()
-                .expect("Failed to wait device idle x")
+                .expect("Failed to wait device idle.")
         };
         // Recreate swapchain
         self.facade.destroy(&self.gpu);

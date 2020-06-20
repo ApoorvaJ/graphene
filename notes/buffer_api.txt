@@ -17,6 +17,10 @@ let environment_texture = ctx
     )
     .unwrap();
 
+/* Step 1: The context creates a buffer handle (hash) from the name and returns
+   it. The same handle can represent different underlying buffers. In this
+   example, this is because there's a different graph and hence a different
+   buffer for each swapchain target. */
 let uniform_buffer = ctx
     .new_buffer(
         "lit pass uniform buffer",
@@ -31,6 +35,9 @@ loop {
 
     // Build and execute render graph
     let mut graph_builder = graphene::GraphBuilder::new();
+
+    /* Step 2: The graph builder registers the buffer handle into the given
+       pass. */
     let pass_0 = ctx
         .add_pass(
             &mut graph_builder,
@@ -45,6 +52,8 @@ loop {
         .unwrap();
 
     let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
+    /* Step 3: When the graph is built, each buffer handle is allocated a unique
+       concrete buffer. */
     let graph = ctx.build_graph(graph_builder);
     ctx.begin_pass(graph, pass_0);
     {
@@ -53,7 +62,10 @@ loop {
         };
 
         // TODO: Ensure that begin_pass() has been called.
-        ctx.upload_to_buffer(uniform_buffer, &ubo);
+        // TODO: Make this call a method belonging to `graph` instead of `ctx`.
+        /* Step 4: First look up the graph, then look up the concrete buffer
+           belonging to the buffer handle, then upload to that buffer. */
+        ctx.upload_to_buffer(graph, uniform_buffer, &ubo);
         uniform_buffers[ctx.swapchain_idx].upload_data(&ubos, 0, &ctx.gpu);
 
         unsafe {
