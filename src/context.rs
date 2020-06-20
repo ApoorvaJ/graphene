@@ -7,13 +7,13 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
 #[derive(Copy, Clone)]
-pub struct BufferHandle(u64);
+pub struct BufferHandle(pub u64);
 #[derive(Copy, Clone)]
-pub struct GraphHandle(u64);
+pub struct GraphHandle(pub u64);
 #[derive(Copy, Clone)]
-pub struct PassHandle(u64);
+pub struct PassHandle(pub u64);
 #[derive(Copy, Clone)]
-pub struct TextureHandle(u64);
+pub struct TextureHandle(pub u64);
 
 #[derive(Copy, Clone)]
 pub enum TextureSize {
@@ -25,8 +25,8 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
 
-    texture_list: Vec<(TextureHandle, Texture, TextureSize)>,
-    buffer_list: Vec<(BufferHandle, HostVisibleBuffer)>,
+    pub texture_list: Vec<InternalTexture>,
+    pub buffer_list: Vec<InternalBuffer>,
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
@@ -81,12 +81,18 @@ impl Context {
         self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
         // Recreate the textures which depend on the resolution of the swapchain
         for i in 0..self.texture_list.len() {
-            let (_, tex, _) = &self.texture_list[i];
-            if let TextureSize::Relative { scale } = self.texture_list[i].2 {
+            let tex = &mut self.texture_list[i];
+            if let TextureSize::Relative { scale } = tex.size {
                 let w = (self.facade.swapchain_width as f32 * scale) as u32;
                 let h = (self.facade.swapchain_height as f32 * scale) as u32;
-                self.texture_list[i].1 =
-                    Texture::new(&self.gpu, w, h, tex.format, tex.usage, tex.aspect_flags);
+                tex.texture = Texture::new(
+                    &self.gpu,
+                    w,
+                    h,
+                    tex.texture.format,
+                    tex.texture.usage,
+                    tex.texture.aspect_flags,
+                );
             }
         }
     }
@@ -462,119 +468,5 @@ impl Context {
             hasher.finish()
         };
         Ok(PassHandle(pass_hash))
-    }
-}
-
-/* Textures */
-
-impl Context {
-    fn get_texture_from_hash(&self, hash: u64) -> Option<&Texture> {
-        let opt_texture_and_handle = self
-            .texture_list
-            .iter()
-            .find(|(tex_handle, _, _)| tex_handle.0 == hash);
-
-        if let Some((_, tex, _)) = opt_texture_and_handle {
-            return Some(tex);
-        }
-
-        return None;
-    }
-
-    pub fn new_texture_relative_size(
-        &mut self,
-        name: &str,
-        scale: f32,
-        format: vk::Format,
-        usage: vk::ImageUsageFlags,
-        aspect_flags: vk::ImageAspectFlags,
-    ) -> Result<TextureHandle, String> {
-        // Hash texture name
-        let new_hash: u64 = {
-            let mut hasher = DefaultHasher::new();
-            name.hash(&mut hasher);
-            hasher.finish()
-        };
-        // If texture with same hash already exists, return error
-        if self.get_texture_from_hash(new_hash).is_some() {
-            return Err(format!(
-                "A texture with the same name `{}` already exists in the context.",
-                name
-            ));
-        }
-        // Create new texture
-        let w = (self.facade.swapchain_width as f32 * scale) as u32;
-        let h = (self.facade.swapchain_height as f32 * scale) as u32;
-        let tex = Texture::new(&self.gpu, w, h, format, usage, aspect_flags);
-        self.texture_list.push((
-            TextureHandle(new_hash),
-            tex,
-            TextureSize::Relative { scale },
-        ));
-
-        Ok(TextureHandle(new_hash))
-    }
-
-    pub fn new_texture_from_file(
-        &mut self,
-        name: &str,
-        path: &str,
-    ) -> Result<TextureHandle, String> {
-        // Hash texture name
-        let new_hash: u64 = {
-            let mut hasher = DefaultHasher::new();
-            name.hash(&mut hasher);
-            hasher.finish()
-        };
-        // If texture with same hash already exists, return error
-        if self.get_texture_from_hash(new_hash).is_some() {
-            return Err(format!(
-                "A texture with the same name `{}` already exists in the context.",
-                name
-            ));
-        }
-        // Create new texture
-        let tex =
-            Texture::new_from_image(&self.gpu, std::path::Path::new(&path), self.command_pool);
-        self.texture_list
-            .push((TextureHandle(new_hash), tex, TextureSize::Absolute));
-
-        Ok(TextureHandle(new_hash))
-    }
-}
-
-/* Buffers */
-
-impl Context {
-    fn get_buffer_from_hash(&self, hash: u64) -> Option<&HostVisibleBuffer> {
-        let opt_buffer_and_handle = self
-            .buffer_list
-            .iter()
-            .find(|(buffer_handle, _)| buffer_handle.0 == hash);
-
-        if let Some((_, buffer)) = opt_buffer_and_handle {
-            return Some(buffer);
-        }
-
-        return None;
-    }
-
-    pub fn new_buffer(&mut self, name: &str, size: usize) -> Result<BufferHandle, String> {
-        // Hash buffer name
-        let new_hash: u64 = {
-            let mut hasher = DefaultHasher::new();
-            name.hash(&mut hasher);
-            hasher.finish()
-        };
-        // If buffer with same hash already exists, return error
-        if self.get_buffer_from_hash(new_hash).is_some() {
-            return Err(format!(
-                "A texture with the same name `{}` already exists in the context.",
-                name
-            ));
-        }
-        let buffer = HostVisibleBuffer::new(size, vk::BufferUsageFlags::UNIFORM_BUFFER, &self.gpu);
-        self.buffer_list.push((BufferHandle(new_hash), buffer));
-        Ok(BufferHandle(new_hash))
     }
 }
