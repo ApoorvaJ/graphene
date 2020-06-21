@@ -53,36 +53,12 @@ fn main() {
 
         let elapsed_seconds = start_instant.elapsed().as_secs_f32();
 
-        // Update uniform buffer
-        let mtx_model_to_world =
-            Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
-                * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
-        let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
-            * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
-        let mtx_view_to_clip = {
-            let width = ctx.facade.swapchain_width;
-            let height = ctx.facade.swapchain_height;
-            Mat4::perspective_lh(
-                60.0 * DEGREES_TO_RADIANS,
-                width as f32 / height as f32,
-                0.01,
-                100.0,
-            )
-        };
-
-        let mtx_model_to_view = mtx_world_to_view * mtx_model_to_world;
-        let ubos = [UniformBuffer {
-            mtx_model_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_model_to_world,
-            mtx_model_to_view,
-            mtx_model_to_view_norm: mtx_model_to_view.inverse().transpose(),
-            elapsed_seconds,
-        }];
-
-        uniform_buffers[ctx.swapchain_idx].upload_data(&ubos, 0, &ctx.gpu);
-
         // Build and execute render graph
         {
             let mut graph_builder = graphene::GraphBuilder::new();
+            let uniform_buffer = graph_builder
+                .new_uniform_buffer("uniform buffer", uniform_buffer_size)
+                .unwrap();
             let pass_0 = ctx
                 .add_pass(
                     &mut graph_builder,
@@ -91,6 +67,7 @@ fn main() {
                     Some(depth_texture),
                     &ctx.shader_modules,
                     &uniform_buffers[ctx.swapchain_idx],
+                    uniform_buffer,
                     environment_texture,
                     &environment_sampler,
                 )
@@ -100,6 +77,33 @@ fn main() {
             let graph = ctx.build_graph(graph_builder);
             ctx.begin_pass(graph, pass_0);
             unsafe {
+                // Update uniform buffer
+                let mtx_model_to_world =
+                    Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
+                        * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
+                let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
+                    * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
+                let mtx_view_to_clip = {
+                    let width = ctx.facade.swapchain_width;
+                    let height = ctx.facade.swapchain_height;
+                    Mat4::perspective_lh(
+                        60.0 * DEGREES_TO_RADIANS,
+                        width as f32 / height as f32,
+                        0.01,
+                        100.0,
+                    )
+                };
+
+                let mtx_model_to_view = mtx_world_to_view * mtx_model_to_world;
+                let ubos = [UniformBuffer {
+                    mtx_model_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_model_to_world,
+                    mtx_model_to_view,
+                    mtx_model_to_view_norm: mtx_model_to_view.inverse().transpose(),
+                    elapsed_seconds,
+                }];
+
+                ctx.upload_data(graph, uniform_buffer, &ubos);
+
                 // Bind index and vertex buffers
                 {
                     let vertex_buffers = [mesh.vertex_buffer.vk_buffer];

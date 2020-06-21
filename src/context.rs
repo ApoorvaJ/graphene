@@ -6,7 +6,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Hash)]
 pub struct BufferHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct GraphHandle(pub u64);
@@ -26,7 +26,6 @@ pub struct Context {
     event_loop: winit::event_loop::EventLoop<()>,
 
     pub texture_list: Vec<InternalTexture>,
-    pub buffer_list: Vec<InternalBuffer>,
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
@@ -165,7 +164,6 @@ impl Context {
             event_loop: event_loop,
 
             texture_list: Vec::new(),
-            buffer_list: Vec::new(),
             graph_cache: Vec::new(),
             shader_modules,
             command_pool,
@@ -200,10 +198,8 @@ impl Context {
         if opt_idx.is_none() {
             // The requested graph doesn't exist. Build it and add it to the cache.
             println!("Adding graph to cache");
-            self.graph_cache.push((
-                Graph::new(graph_builder, &self.gpu.device),
-                GraphHandle(req_hash),
-            ));
+            self.graph_cache
+                .push((Graph::new(graph_builder, &self.gpu), GraphHandle(req_hash)));
         }
 
         GraphHandle(req_hash)
@@ -419,7 +415,8 @@ impl Context {
         output_texs: &Vec<&Texture>,
         opt_depth_tex: Option<TextureHandle>,
         shader_modules: &Vec<vk::ShaderModule>,
-        buffer: &HostVisibleBuffer,
+        buffer: &HostVisibleBuffer, // TODO: Remove
+        uniform_buffer: BufferHandle,
         texture_handle: TextureHandle,
         environment_sampler: &Sampler,
     ) -> Result<PassHandle, String> {
@@ -459,6 +456,7 @@ impl Context {
             viewport_width: self.facade.swapchain_width,
             viewport_height: self.facade.swapchain_height,
             buffer_info: (buffer.vk_buffer, buffer.size as u64),
+            uniform_buffer,
             shader_modules,
         });
 
@@ -468,5 +466,27 @@ impl Context {
             hasher.finish()
         };
         Ok(PassHandle(pass_hash))
+    }
+
+    pub fn upload_data<T>(
+        &self,
+        graph_handle: GraphHandle,
+        buffer_handle: BufferHandle,
+        data: &[T],
+    ) {
+        let graph = &self
+            .graph_cache
+            .iter()
+            .find(|(_, hash)| hash.0 == graph_handle.0)
+            .unwrap()
+            .0;
+
+        let hvb = &graph
+            .host_visible_buffers
+            .iter()
+            .find(|(handle, _)| handle.0 == buffer_handle.0)
+            .unwrap()
+            .1;
+        hvb.upload_data(data, 0, &self.gpu);
     }
 }

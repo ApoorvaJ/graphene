@@ -6,8 +6,6 @@ pub mod buffer;
 pub use buffer::*;
 pub mod context;
 pub use context::*;
-pub mod context_buffer;
-pub use context_buffer::*;
 pub mod context_texture;
 pub use context_texture::*;
 pub mod debug_marker;

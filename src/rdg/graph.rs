@@ -15,6 +15,7 @@ pub struct Graph {
     pub graphics_pipeline: vk::Pipeline,
     pub built_passes: Vec<BuiltPass>,
     pub passes: Vec<Pass>,
+    pub host_visible_buffers: Vec<(BufferHandle, HostVisibleBuffer)>, // TODO: Unify host-visible and device-local buffers here?
 }
 
 impl Drop for Graph {
@@ -36,7 +37,7 @@ impl Drop for Graph {
 }
 
 impl Graph {
-    pub fn new(graph_builder: GraphBuilder, device: &ash::Device) -> Graph {
+    pub fn new(graph_builder: GraphBuilder, gpu: &Gpu) -> Graph {
         let pass = &graph_builder.passes[0];
 
         // # Create render pass
@@ -101,7 +102,7 @@ impl Graph {
                 .subpasses(&subpasses);
 
             unsafe {
-                device
+                gpu.device
                     .create_render_pass(&renderpass_create_info, None)
                     .expect("Failed to create render pass!")
             }
@@ -125,11 +126,19 @@ impl Graph {
                 .layers(1);
 
             unsafe {
-                device
+                gpu.device
                     .create_framebuffer(&framebuffer_create_info, None)
                     .expect("Failed to create Framebuffer!")
             }
         };
+
+        // Create buffers from buffer aliases
+        // TODO: Conflate multiple buffer aliases into the same buffers
+        let mut host_visible_buffers = Vec::new();
+        for (handle, size) in graph_builder.buffer_aliases {
+            let hvb = HostVisibleBuffer::new(size, vk::BufferUsageFlags::UNIFORM_BUFFER, gpu);
+            host_visible_buffers.push((handle, hvb))
+        }
 
         // # Create descriptor pool
         let descriptor_pool = {
@@ -149,7 +158,7 @@ impl Graph {
                 .pool_sizes(&pool_sizes);
 
             unsafe {
-                device
+                gpu.device
                     .create_descriptor_pool(&descriptor_pool_create_info, None)
                     .expect("Failed to create descriptor pool.")
             }
@@ -199,7 +208,7 @@ impl Graph {
                     vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
 
                 unsafe {
-                    device
+                    gpu.device
                         .create_descriptor_set_layout(&ubo_layout_create_info, None)
                         .expect("Failed to create Descriptor Set Layout!")
                 }
@@ -212,15 +221,20 @@ impl Graph {
                     .descriptor_pool(descriptor_pool)
                     .set_layouts(&layouts);
                 let descriptor_sets = unsafe {
-                    device
+                    gpu.device
                         .allocate_descriptor_sets(&descriptor_set_allocate_info)
                         .expect("Failed to allocate descriptor sets.")
                 };
-                let (vk_buffer, buffer_size) = pass.buffer_info;
+                let hvb = &host_visible_buffers
+                    .iter()
+                    .find(|(handle, _)| handle.0 == pass.uniform_buffer.0)
+                    .unwrap()
+                    .1;
+                // let (vk_buffer, buffer_size) = pass.buffer_info;
                 let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-                    buffer: vk_buffer,
+                    buffer: hvb.vk_buffer,
                     offset: 0,
-                    range: buffer_size as u64,
+                    range: hvb.size as u64,
                 }];
 
                 let (input_image_view, input_sampler) = pass.input_texture;
@@ -252,7 +266,8 @@ impl Graph {
                 ];
 
                 unsafe {
-                    device.update_descriptor_sets(&descriptor_write_sets, &[]);
+                    gpu.device
+                        .update_descriptor_sets(&descriptor_write_sets, &[]);
                 }
                 descriptor_sets[0]
             };
@@ -380,7 +395,7 @@ impl Graph {
                 vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
 
             let pipeline_layout = unsafe {
-                device
+                gpu.device
                     .create_pipeline_layout(&pipeline_layout_create_info, None)
                     .expect("Failed to create pipeline layout.")
             };
@@ -413,7 +428,7 @@ impl Graph {
             }];
 
             let graphics_pipelines = unsafe {
-                device
+                gpu.device
                     .create_graphics_pipelines(
                         vk::PipelineCache::null(),
                         &graphic_pipeline_create_infos,
@@ -426,7 +441,7 @@ impl Graph {
         };
 
         Graph {
-            device: device.clone(),
+            device: gpu.device.clone(),
             descriptor_pool,
             render_pass,
             framebuffer,
@@ -434,6 +449,7 @@ impl Graph {
             pipeline_layout,
             built_passes,
             passes: graph_builder.passes,
+            host_visible_buffers,
         }
     }
 
