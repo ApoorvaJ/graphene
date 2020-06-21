@@ -1,3 +1,32 @@
+/*
+There are the following kinds of buffers:
+1. Mesh buffers. The graph doesn't need to know about these at
+   all. They will be created outside the loop.
+2. Read: e.g. uniform buffers. The graph needs to know about them for the
+   descriptor layouts for each pass. These will be declared in the loop and the
+   backing memory will vary for each graph.
+3. Write: e.g. light/primitive list produced from a compute shader. Need to
+   investigate how these work in Vulkan. They will be declared in the loop.
+
+Vulkan recognizes the following kinds of buffers in its DescriptorType enum:
+a. UNIFORM_TEXEL_BUFFER
+b. STORAGE_TEXEL_BUFFER
+c. UNIFORM_BUFFER
+d. STORAGE_BUFFER
+e. UNIFORM_BUFFER_DYNAMIC
+f. STORAGE_BUFFER_DYNAMIC
+
+See: (https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkDescriptorType.html)
+Note that our case 1. Isn't handled, because meshes aren't bound as descriptors.
+
+---
+
+Unresolved questions:
+1. How will aliasing work? The same backing memory can be used for different
+   intermediate buffers.
+2. How will transient resources work? We especially care about carrying forward
+   some buffers across frames.
+*/
 let mut ctx = graphene::Context::new();
 
 let depth_texture = ctx
@@ -17,16 +46,6 @@ let environment_texture = ctx
     )
     .unwrap();
 
-/* Step 1: The context creates a buffer handle (hash) from the name and returns
-   it. The same handle can represent different underlying buffers. In this
-   example, this is because there's a different graph and hence a different
-   buffer for each swapchain target. */
-let uniform_buffer = ctx
-    .new_buffer(
-        "lit pass uniform buffer",
-        std::mem::size_of::<UniformBuffer>()
-    ).unwrap();
-
 loop {
 
     if !ctx.begin_frame() {
@@ -35,6 +54,14 @@ loop {
 
     // Build and execute render graph
     let mut graph_builder = graphene::GraphBuilder::new();
+
+    /* Step 1: The context creates a buffer handle (hash) from the name,
+       registers it in the graph_builder, and then returns it. */
+    let uniform_buffer = graph_builder.new_buffer(
+            "lit pass uniform buffer",
+            std::mem::size_of::<UniformBuffer>()
+        ).unwrap();
+
 
     /* Step 2: The graph builder registers the buffer handle into the given
        pass. */
@@ -80,12 +107,4 @@ loop {
     ctx.end_pass(graph);
 
     ctx.end_frame();
-}
-
-// TODO: Remove the necessity for this sync
-unsafe {
-    ctx.gpu
-        .device
-        .device_wait_idle()
-        .expect("Failed to wait device idle!");
 }
