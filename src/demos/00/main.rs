@@ -16,7 +16,6 @@ struct UniformBuffer {
 fn main() {
     let mut ctx = graphene::Context::new();
     let start_instant = std::time::Instant::now();
-    let uniform_buffer_size = std::mem::size_of::<UniformBuffer>();
 
     let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
     let depth_texture = ctx
@@ -44,81 +43,79 @@ fn main() {
         let elapsed_seconds = start_instant.elapsed().as_secs_f32();
 
         // Build and execute render graph
-        {
-            let mut graph_builder = graphene::GraphBuilder::new();
-            let uniform_buffer = graph_builder
-                .new_uniform_buffer("uniform buffer", uniform_buffer_size)
-                .unwrap();
-            let pass_0 = ctx
-                .add_pass(
-                    &mut graph_builder,
-                    "forward lit",
-                    &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
-                    Some(depth_texture),
-                    &ctx.shader_modules,
-                    uniform_buffer,
-                    environment_texture,
-                    &environment_sampler,
-                )
-                .unwrap();
+        let mut graph_builder = graphene::GraphBuilder::new();
+        let uniform_buffer = graph_builder
+            .new_uniform_buffer("uniform buffer", std::mem::size_of::<UniformBuffer>())
+            .unwrap();
+        let pass_0 = ctx
+            .add_pass(
+                &mut graph_builder,
+                "forward lit",
+                &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
+                Some(depth_texture),
+                &ctx.shader_modules,
+                uniform_buffer,
+                environment_texture,
+                &environment_sampler,
+            )
+            .unwrap();
 
-            let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
-            let graph = ctx.build_graph(graph_builder);
-            ctx.begin_pass(graph, pass_0);
-            unsafe {
-                // Update uniform buffer
-                let mtx_model_to_world =
-                    Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
-                        * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
-                let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
-                    * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
-                let mtx_view_to_clip = {
-                    let width = ctx.facade.swapchain_width;
-                    let height = ctx.facade.swapchain_height;
-                    Mat4::perspective_lh(
-                        60.0 * DEGREES_TO_RADIANS,
-                        width as f32 / height as f32,
-                        0.01,
-                        100.0,
-                    )
-                };
+        let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
+        let graph = ctx.build_graph(graph_builder);
+        ctx.begin_pass(graph, pass_0);
+        // Update uniform buffer
+        let mtx_model_to_world =
+            Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
+                * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
+        let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
+            * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
+        let mtx_view_to_clip = {
+            let width = ctx.facade.swapchain_width;
+            let height = ctx.facade.swapchain_height;
+            Mat4::perspective_lh(
+                60.0 * DEGREES_TO_RADIANS,
+                width as f32 / height as f32,
+                0.01,
+                100.0,
+            )
+        };
 
-                let mtx_model_to_view = mtx_world_to_view * mtx_model_to_world;
-                let ubos = [UniformBuffer {
-                    mtx_model_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_model_to_world,
-                    mtx_model_to_view,
-                    mtx_model_to_view_norm: mtx_model_to_view.inverse().transpose(),
-                    elapsed_seconds,
-                }];
+        let mtx_model_to_view = mtx_world_to_view * mtx_model_to_world;
+        let ubos = [UniformBuffer {
+            mtx_model_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_model_to_world,
+            mtx_model_to_view,
+            mtx_model_to_view_norm: mtx_model_to_view.inverse().transpose(),
+            elapsed_seconds,
+        }];
 
-                ctx.upload_data(graph, uniform_buffer, &ubos);
+        ctx.upload_data(graph, uniform_buffer, &ubos);
 
-                // Bind index and vertex buffers
-                {
-                    let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
-                    let offsets = [0_u64];
-                    ctx.gpu
-                        .device
-                        .cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
-                    ctx.gpu.device.cmd_bind_index_buffer(
-                        cmd_buf,
-                        mesh.index_buffer.vk_buffer,
-                        0,
-                        vk::IndexType::UINT32,
-                    );
-                }
-
-                ctx.gpu.device.cmd_draw_indexed(
+        unsafe {
+            // Bind index and vertex buffers
+            {
+                let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
+                let offsets = [0_u64];
+                ctx.gpu
+                    .device
+                    .cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
+                ctx.gpu.device.cmd_bind_index_buffer(
                     cmd_buf,
-                    mesh.index_buffer.num_elements as u32,
-                    1,
+                    mesh.index_buffer.vk_buffer,
                     0,
-                    0,
-                    0,
+                    vk::IndexType::UINT32,
                 );
             }
-            ctx.end_pass(graph);
+
+            ctx.gpu.device.cmd_draw_indexed(
+                cmd_buf,
+                mesh.index_buffer.num_elements as u32,
+                1,
+                0,
+                0,
+                0,
+            );
         }
+        ctx.end_pass(graph);
 
         ctx.end_frame();
     }

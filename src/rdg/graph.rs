@@ -298,7 +298,7 @@ impl Graph {
                 },
             ];
 
-            // (pos: vec3 + color: vec3) = 6 floats * 4 bytes per float
+            // (pos: vec3 + normal: vec3) = 6 floats * 4 bytes per float
             const VERTEX_STRIDE: u32 = 24;
             let binding_descriptions = [vk::VertexInputBindingDescription {
                 binding: 0,
