@@ -415,7 +415,6 @@ impl Context {
         output_texs: &Vec<&Texture>,
         opt_depth_tex: Option<TextureHandle>,
         shader_modules: &Vec<vk::ShaderModule>,
-        buffer: &HostVisibleBuffer, // TODO: Remove
         uniform_buffer: BufferHandle,
         texture_handle: TextureHandle,
         environment_sampler: &Sampler,
@@ -455,7 +454,6 @@ impl Context {
             opt_depth,
             viewport_width: self.facade.swapchain_width,
             viewport_height: self.facade.swapchain_height,
-            buffer_info: (buffer.vk_buffer, buffer.size as u64),
             uniform_buffer,
             shader_modules,
         });

@@ -36,16 +36,6 @@ fn main() {
         )
         .unwrap();
 
-    let uniform_buffers: Vec<graphene::HostVisibleBuffer> = (0..ctx.facade.num_frames)
-        .map(|_| {
-            graphene::HostVisibleBuffer::new(
-                uniform_buffer_size,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                &ctx.gpu,
-            )
-        })
-        .collect();
-
     loop {
         if !ctx.begin_frame() {
             break;
@@ -66,7 +56,6 @@ fn main() {
                     &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
                     Some(depth_texture),
                     &ctx.shader_modules,
-                    &uniform_buffers[ctx.swapchain_idx],
                     uniform_buffer,
                     environment_texture,
                     &environment_sampler,

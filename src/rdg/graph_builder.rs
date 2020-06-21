@@ -11,7 +11,6 @@ pub struct Pass {
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub shader_modules: Vec<vk::ShaderModule>,
-    pub buffer_info: (vk::Buffer, u64), // (vk_buffer, size) // TODO: Remove
     pub uniform_buffer: BufferHandle,
 }
 
