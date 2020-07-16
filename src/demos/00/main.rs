@@ -64,18 +64,16 @@ fn main() {
         ctx.begin_pass(graph, pass_0);
         // Update uniform buffer
         {
-            // let mtx_model_to_world =
-            //     Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
-            //         * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
-            // let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
-            //     * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
             let obj_pos = Vec3::new(0.0, 0.0, 0.0);
             let obj_rot = Quat::from_rotation_z(elapsed_seconds * 0.3);
-            // let obj_rot = Quat::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
+            let obj_scale = Vec3::new(1.0, 1.0, 1.0);
+
+            let mtx_rot_scale = Mat4::from_quat(obj_rot)
+                * Mat4::from_scale(obj_scale)
+                * Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS);
             let mtx_obj_to_world = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
                 * Mat4::from_translation(obj_pos)
-                * Mat4::from_quat(obj_rot)
-                * Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS);
+                * mtx_rot_scale;
             let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0));
             let mtx_view_to_clip = {
                 let width = ctx.facade.swapchain_width;
@@ -88,20 +86,11 @@ fn main() {
                 )
             };
 
-            let mtx_norm_obj_to_world = (
-                //
-                // Mat4::from_quat(obj_rot).inverse()
-                // * mtx_obj_to_world
-                // ---
-                // Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS)
-                // ---
-                Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS)
-                // ---
-                * Mat4::from_quat(obj_rot).inverse()
-                //
-            )
-            .inverse()
-            .transpose(); // TODO: Orthogonal optimization?
+            /* This matrix is an orthogonal matrix if scaling is uniform, in
+            which case the inverse transpose is the same as the matrix itself.
+            However, we want to support non-uniform scaling, so we
+            do the inverse transpose. */
+            let mtx_norm_obj_to_world = mtx_rot_scale.inverse().transpose();
 
             let ubos = [UniformBuffer {
                 mtx_obj_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_obj_to_world,

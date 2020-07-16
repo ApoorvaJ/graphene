@@ -105,7 +105,7 @@ impl Context {
             winit::window::WindowBuilder::new()
                 .with_title(APP_NAME)
                 .with_inner_size(winit::dpi::LogicalSize::new(800, 600))
-                // .with_maximized(true)
+                .with_maximized(true)
                 .build(&event_loop)
                 .expect("Failed to create window.")
         };
