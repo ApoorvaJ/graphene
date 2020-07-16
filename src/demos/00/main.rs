@@ -64,6 +64,8 @@ fn main() {
         ctx.begin_pass(graph, pass_0);
         // Update uniform buffer
         {
+            let cam_pos = Vec3::new(0.0, -6.0, 0.0);
+            let cam_rot = Quat::from_rotation_z((elapsed_seconds * 1.5).sin() * 0.125 * PI);
             let obj_pos = Vec3::new(0.0, 0.0, 0.0);
             let obj_rot = Quat::from_rotation_z(elapsed_seconds * 0.3);
             let obj_scale = Vec3::new(1.0, 1.0, 1.0);
@@ -74,7 +76,10 @@ fn main() {
             let mtx_obj_to_world = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
                 * Mat4::from_translation(obj_pos)
                 * mtx_rot_scale;
-            let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0));
+            let mtx_world_to_view = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
+                * Mat4::from_quat(cam_rot)
+                * Mat4::from_translation(-cam_pos)
+                * Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS);
             let mtx_view_to_clip = {
                 let width = ctx.facade.swapchain_width;
                 let height = ctx.facade.swapchain_height;
