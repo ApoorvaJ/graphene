@@ -7,9 +7,8 @@ const DEGREES_TO_RADIANS: f32 = PI / 180.0;
 
 #[allow(dead_code)]
 struct UniformBuffer {
-    mtx_model_to_clip: Mat4,
-    mtx_model_to_view: Mat4,
-    mtx_model_to_view_norm: Mat4,
+    mtx_obj_to_clip: Mat4,
+    mtx_norm_obj_to_world: Mat4,
     elapsed_seconds: f32,
 }
 
@@ -64,31 +63,54 @@ fn main() {
         let graph = ctx.build_graph(graph_builder);
         ctx.begin_pass(graph, pass_0);
         // Update uniform buffer
-        let mtx_model_to_world =
-            Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
-                * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
-        let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
-            * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
-        let mtx_view_to_clip = {
-            let width = ctx.facade.swapchain_width;
-            let height = ctx.facade.swapchain_height;
-            Mat4::perspective_lh(
-                60.0 * DEGREES_TO_RADIANS,
-                width as f32 / height as f32,
-                0.01,
-                100.0,
+        {
+            // let mtx_model_to_world =
+            //     Mat4::from_rotation_y((160.0 + 20.0 * elapsed_seconds) * DEGREES_TO_RADIANS)
+            //         * Mat4::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
+            // let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0))
+            //     * Mat4::from_rotation_x(20.0 * DEGREES_TO_RADIANS);
+            let obj_pos = Vec3::new(0.0, 0.0, 0.0);
+            let obj_rot = Quat::from_rotation_z(elapsed_seconds * 0.3);
+            // let obj_rot = Quat::from_rotation_z(180.0 * DEGREES_TO_RADIANS);
+            let mtx_obj_to_world = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
+                * Mat4::from_translation(obj_pos)
+                * Mat4::from_quat(obj_rot)
+                * Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS);
+            let mtx_world_to_view = Mat4::from_translation(Vec3::new(0.0, 0.0, 3.0));
+            let mtx_view_to_clip = {
+                let width = ctx.facade.swapchain_width;
+                let height = ctx.facade.swapchain_height;
+                Mat4::perspective_lh(
+                    60.0 * DEGREES_TO_RADIANS,
+                    width as f32 / height as f32,
+                    0.01,
+                    100.0,
+                )
+            };
+
+            let mtx_norm_obj_to_world = (
+                //
+                // Mat4::from_quat(obj_rot).inverse()
+                // * mtx_obj_to_world
+                // ---
+                // Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS)
+                // ---
+                Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS)
+                // ---
+                * Mat4::from_quat(obj_rot).inverse()
+                //
             )
-        };
+            .inverse()
+            .transpose(); // TODO: Orthogonal optimization?
 
-        let mtx_model_to_view = mtx_world_to_view * mtx_model_to_world;
-        let ubos = [UniformBuffer {
-            mtx_model_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_model_to_world,
-            mtx_model_to_view,
-            mtx_model_to_view_norm: mtx_model_to_view.inverse().transpose(),
-            elapsed_seconds,
-        }];
+            let ubos = [UniformBuffer {
+                mtx_obj_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_obj_to_world,
+                mtx_norm_obj_to_world,
+                elapsed_seconds,
+            }];
 
-        ctx.upload_data(graph, uniform_buffer, &ubos);
+            ctx.upload_data(graph, uniform_buffer, &ubos);
+        }
 
         unsafe {
             // Bind index and vertex buffers

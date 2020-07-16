@@ -3,14 +3,12 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(set = 0, binding = 0) uniform UniformBuffer {
-    mat4 mtx_model_to_clip;
-    mat4 mtx_model_to_view;
-    mat4 mtx_model_to_view_norm;
+    mat4 mtx_obj_to_clip;
+    mat4 mtx_norm_obj_to_world;
     float elapsed_seconds;
 } ubo;
 layout (binding = 1) uniform sampler2D tex_sampler;
-layout(location = 0) in vec3 frag_norm_vs;
-layout(location = 1) in vec3 frag_pos_vs;
+layout(location = 0) in vec3 frag_norm_world;
 layout(location = 0) out vec4 out_color;
 
 const float PI = 3.14159265358979323846264338327950288;
@@ -20,13 +18,14 @@ vec3 f_schlick(vec3 f0, float f90, float u) {
 }
 
 void main() {
-    vec3 n = normalize(frag_norm_vs);
+    vec3 n = normalize(frag_norm_world);
+    out_color = vec4(n.xyz, 1.0);
+    return;
 
     // float roughness = cos(ubo.elapsed_seconds) * 0.5 + 0.5;
     float roughness = 1.0;
     roughness = clamp(roughness * roughness, 1e-5, 1.0);
     vec3 v = vec3(0, 0, -1);
-    // vec3 v = -normalize(frag_pos_vs);
 
     const vec3 lights[2] = vec3[](
         vec3(0, -1, 0),
