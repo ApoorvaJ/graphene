@@ -1,6 +1,7 @@
 use crate::*;
 
 pub struct Facade {
+    device: ash::Device,
     // Surface info. Changes with resolution.
     pub surface_caps: vk::SurfaceCapabilitiesKHR,
     pub surface_formats: Vec<vk::SurfaceFormatKHR>,
@@ -9,7 +10,7 @@ pub struct Facade {
     pub swapchain_width: u32,
     pub swapchain_height: u32,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_textures: Vec<Texture>, // Color textures that are presented to the screen
+    pub swapchain_textures: Vec<TextureHandle>, // Color textures that are presented to the screen
     // Synchronization primitives. These aren't really resolution-dependent
     // and could technically be moved outside the struct. They are kept here
     // because they're closely related to the rest of the members.
@@ -21,8 +22,14 @@ pub struct Facade {
 }
 
 impl Facade {
-    pub fn new(basis: &Basis, gpu: &Gpu, window: &winit::window::Window) -> Facade {
-        let ext_swapchain = ash::extensions::khr::Swapchain::new(&basis.instance, &gpu.device);
+    pub fn new(
+        basis: &Basis,
+        gpu: &Gpu,
+        window: &winit::window::Window,
+        texture_list: &mut Vec<InternalTexture>,
+    ) -> Facade {
+        let device = gpu.device.clone();
+        let ext_swapchain = ash::extensions::khr::Swapchain::new(&basis.instance, &device);
 
         // # Get surface info
         let surface_caps = unsafe {
@@ -146,7 +153,7 @@ impl Facade {
                         });
 
                     unsafe {
-                        gpu.device
+                        device
                             .create_image_view(&info, None)
                             .expect("Failed to create image view.")
                     }
@@ -156,9 +163,10 @@ impl Facade {
             imageviews
         };
 
+        // Add swapchain textures to the context's texture list
         let swapchain_textures = (0..num_frames)
             .map(|i| {
-                Texture {
+                let texture = Texture {
                     width: swapchain_extent.width,
                     height: swapchain_extent.height,
                     format: swapchain_format,
@@ -167,8 +175,23 @@ impl Facade {
                     image: swapchain_images[i as usize],
                     image_view: swapchain_imageviews[i as usize],
                     opt_device_memory: None, // This memory is not allocated by us. It is part of the swapchain.
-                    device: gpu.device.clone(),
-                }
+                    device: device.clone(),
+                };
+                let name = String::from(&format!("swapchain_{}", i));
+                let hash: u64 = {
+                    let mut hasher = DefaultHasher::new();
+                    name.hash(&mut hasher);
+                    hasher.finish()
+                };
+                let handle = TextureHandle(hash);
+                texture_list.push(InternalTexture {
+                    handle,
+                    name,
+                    texture,
+                    kind: TextureKind::Swapchain,
+                });
+
+                handle
             })
             .collect();
 
@@ -188,17 +211,17 @@ impl Facade {
             for _ in 0..num_frames {
                 unsafe {
                     image_available_semaphores.push(
-                        gpu.device
+                        device
                             .create_semaphore(&semaphore_create_info, None)
                             .expect("Failed to create Semaphore Object!"),
                     );
                     render_finished_semaphores.push(
-                        gpu.device
+                        device
                             .create_semaphore(&semaphore_create_info, None)
                             .expect("Failed to create Semaphore Object!"),
                     );
                     command_buffer_complete_fences.push(
-                        gpu.device
+                        device
                             .create_fence(&fence_create_info, None)
                             .expect("Failed to create Fence Object!"),
                     );
@@ -212,6 +235,7 @@ impl Facade {
         };
 
         Facade {
+            device,
             surface_caps,
             surface_formats,
             num_frames: num_frames as usize,
@@ -226,18 +250,20 @@ impl Facade {
         }
     }
 
-    pub fn destroy(&self, gpu: &Gpu) {
+    pub fn destroy(&self, texture_list: &mut Vec<InternalTexture>) {
         unsafe {
             for i in 0..self.num_frames {
-                gpu.device
+                self.device
                     .destroy_semaphore(self.image_available_semaphores[i], None);
-                gpu.device
+                self.device
                     .destroy_semaphore(self.render_finished_semaphores[i], None);
-                gpu.device
+                self.device
                     .destroy_fence(self.command_buffer_complete_fences[i], None);
             }
 
             self.ext_swapchain.destroy_swapchain(self.swapchain, None);
         }
+        // Delete swapchain textures from texture list
+        texture_list.retain(|t| t.kind != TextureKind::Swapchain);
     }
 }

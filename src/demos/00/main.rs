@@ -50,7 +50,7 @@ fn main() {
             .add_pass(
                 &mut graph_builder,
                 "forward lit",
-                &vec![&ctx.facade.swapchain_textures[ctx.swapchain_idx]],
+                &vec![ctx.facade.swapchain_textures[ctx.swapchain_idx]],
                 Some(depth_texture),
                 &ctx.shader_modules,
                 uniform_buffer,

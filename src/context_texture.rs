@@ -1,11 +1,17 @@
 use crate::*;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum TextureKind {
+    Swapchain,
+    AbsoluteSized,
+    RelativeSized { scale: f32 }, // Scale relative to the swapchain size
+}
 
 pub struct InternalTexture {
     pub handle: TextureHandle,
+    pub name: String,
     pub texture: Texture,
-    pub size: TextureSize,
+    pub kind: TextureKind,
 }
 
 impl Context {
@@ -46,8 +52,9 @@ impl Context {
         let tex = Texture::new(&self.gpu, w, h, format, usage, aspect_flags);
         self.texture_list.push(InternalTexture {
             handle: TextureHandle(new_hash),
+            name: String::from(name),
             texture: tex,
-            size: TextureSize::Relative { scale },
+            kind: TextureKind::RelativeSized { scale },
         });
 
         Ok(TextureHandle(new_hash))
@@ -76,8 +83,9 @@ impl Context {
             Texture::new_from_image(&self.gpu, std::path::Path::new(&path), self.command_pool);
         self.texture_list.push(InternalTexture {
             handle: TextureHandle(new_hash),
+            name: String::from(name),
             texture: tex,
-            size: TextureSize::Absolute,
+            kind: TextureKind::AbsoluteSized,
         });
 
         Ok(TextureHandle(new_hash))

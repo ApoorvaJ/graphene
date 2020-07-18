@@ -1,7 +1,5 @@
 use crate::*;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
@@ -14,12 +12,6 @@ pub struct GraphHandle(pub u64);
 pub struct PassHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct TextureHandle(pub u64);
-
-#[derive(Copy, Clone)]
-pub enum TextureSize {
-    Absolute,                // Number of pixels
-    Relative { scale: f32 }, // Scale relative to the swapchain size
-}
 
 pub struct Context {
     window: winit::window::Window,
@@ -58,7 +50,7 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            self.facade.destroy(&self.gpu);
+            self.facade.destroy(&mut self.texture_list);
 
             for stage in &self.shader_modules {
                 self.gpu.device.destroy_shader_module(*stage, None);
@@ -76,12 +68,12 @@ impl Context {
                 .expect("Failed to wait device idle.")
         };
         // Recreate swapchain
-        self.facade.destroy(&self.gpu);
-        self.facade = Facade::new(&self.basis, &self.gpu, &self.window);
+        self.facade.destroy(&mut self.texture_list);
+        self.facade = Facade::new(&self.basis, &self.gpu, &self.window, &mut self.texture_list);
         // Recreate the textures which depend on the resolution of the swapchain
         for i in 0..self.texture_list.len() {
             let tex = &mut self.texture_list[i];
-            if let TextureSize::Relative { scale } = tex.size {
+            if let TextureKind::RelativeSized { scale } = tex.kind {
                 let w = (self.facade.swapchain_width as f32 * scale) as u32;
                 let h = (self.facade.swapchain_height as f32 * scale) as u32;
                 tex.texture = Texture::new(
@@ -128,7 +120,8 @@ impl Context {
         };
 
         // TODO: Move this up?
-        let facade = Facade::new(&basis, &gpu, &window);
+        let mut texture_list = Vec::new();
+        let facade = Facade::new(&basis, &gpu, &window, &mut texture_list);
 
         // # Allocate command buffers
         let command_buffers = {
@@ -163,7 +156,7 @@ impl Context {
             window,
             event_loop: event_loop,
 
-            texture_list: Vec::new(),
+            texture_list,
             graph_cache: Vec::new(),
             shader_modules,
             command_pool,
@@ -412,7 +405,7 @@ impl Context {
         &self,
         graph_builder: &mut GraphBuilder,
         name: &str,
-        output_texs: &Vec<&Texture>,
+        output_texs: &Vec<TextureHandle>,
         opt_depth_tex: Option<TextureHandle>,
         shader_modules: &Vec<vk::ShaderModule>,
         uniform_buffer: BufferHandle,
@@ -422,7 +415,13 @@ impl Context {
         // TODO: Assert that color and depth textures have the same resolution
         let outputs = output_texs
             .iter()
-            .map(|tex| (tex.image_view, tex.format))
+            .map(|handle| {
+                let tex = self.get_texture_from_hash(handle.0).expect(&format!(
+                    "Output texture with handle `{}` not found in context.",
+                    handle.0
+                ));
+                (tex.image_view, tex.format)
+            })
             .collect();
         let shader_modules = shader_modules
             .iter()

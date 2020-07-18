@@ -29,6 +29,8 @@ use ash::version::DeviceV1_0;
 use ash::version::EntryV1_0;
 use ash::version::InstanceV1_0;
 use ash::vk;
+use std::collections::hash_map::DefaultHasher;
 use std::ffi::CStr;
 use std::ffi::CString;
+use std::hash::{Hash, Hasher};
 use std::ptr;
