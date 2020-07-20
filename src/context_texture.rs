@@ -15,14 +15,8 @@ pub struct InternalTexture {
 }
 
 impl Context {
-    pub fn get_texture_from_hash(&self, hash: u64) -> Option<&Texture> {
-        let opt_texture_and_handle = self.texture_list.iter().find(|tex| tex.handle.0 == hash);
-
-        if let Some(tex) = opt_texture_and_handle {
-            return Some(&tex.texture);
-        }
-
-        return None;
+    pub fn get_texture_from_hash(&self, hash: u64) -> Option<&InternalTexture> {
+        self.texture_list.iter().find(|tex| tex.handle.0 == hash)
     }
 
     pub fn new_texture_relative_size(

@@ -15,7 +15,6 @@ pub struct Graph {
     pub graphics_pipeline: vk::Pipeline,
     pub built_passes: Vec<BuiltPass>,
     pub passes: Vec<Pass>,
-    pub host_visible_buffers: Vec<(BufferHandle, HostVisibleBuffer)>, // TODO: Unify host-visible and device-local buffers here?
 }
 
 impl Drop for Graph {
@@ -134,14 +133,6 @@ impl Graph {
             }
         };
 
-        // Create buffers from buffer aliases
-        // TODO: Conflate multiple buffer aliases into the same buffers
-        let mut host_visible_buffers = Vec::new();
-        for (handle, size) in graph_builder.buffer_aliases {
-            let hvb = HostVisibleBuffer::new(size, vk::BufferUsageFlags::UNIFORM_BUFFER, gpu);
-            host_visible_buffers.push((handle, hvb))
-        }
-
         // # Create descriptor pool
         let descriptor_pool = {
             let pool_sizes = [
@@ -226,16 +217,10 @@ impl Graph {
                     .allocate_descriptor_sets(&descriptor_set_allocate_info)
                     .expect("Failed to allocate descriptor sets.")
             };
-            let hvb = &host_visible_buffers
-                .iter()
-                .find(|(handle, _)| handle.0 == pass.uniform_buffer.0)
-                .unwrap()
-                .1;
-            // let (vk_buffer, buffer_size) = pass.buffer_info;
             let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-                buffer: hvb.vk_buffer,
+                buffer: pass.uniform_buffer.0,
                 offset: 0,
-                range: hvb.size as u64,
+                range: pass.uniform_buffer.1 as u64,
             }];
 
             let (input_image_view, input_sampler) = pass.input_texture;
@@ -448,7 +433,6 @@ impl Graph {
             pipeline_layout,
             built_passes,
             passes: graph_builder.passes,
-            host_visible_buffers,
         }
     }
 

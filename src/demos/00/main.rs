@@ -16,7 +16,6 @@ fn execute_pass(
     ctx: &mut graphene::Context,
     elapsed_seconds: f32,
     uniform_buffer: graphene::BufferHandle,
-    graph: graphene::GraphHandle,
     cmd_buf: vk::CommandBuffer,
     mesh: &graphene::Mesh,
 ) {
@@ -62,7 +61,7 @@ fn execute_pass(
             elapsed_seconds,
         }];
 
-        ctx.upload_data(graph, uniform_buffer, &ubos);
+        ctx.upload_data(uniform_buffer, &ubos);
     }
     // Bind index and vertex buffers
     unsafe {
@@ -118,8 +117,13 @@ fn main() {
 
         // Build and execute render graph
         let mut graph_builder = graphene::GraphBuilder::new();
-        let uniform_buffer = graph_builder
-            .new_uniform_buffer("uniform buffer", std::mem::size_of::<UniformBuffer>())
+        let uniform_buffer = ctx
+            .new_buffer(
+                // TODO: Avoid having the swapchain index, automatically creating a unique uniform buffer per graph.
+                &format!("uniform buffer_{}", ctx.swapchain_idx),
+                std::mem::size_of::<UniformBuffer>(),
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+            )
             .unwrap();
         let pass_0 = ctx
             .add_pass(
@@ -149,25 +153,11 @@ fn main() {
         let graph = ctx.build_graph(graph_builder);
         // Pass 0
         ctx.begin_pass(graph, pass_0);
-        execute_pass(
-            &mut ctx,
-            elapsed_seconds,
-            uniform_buffer,
-            graph,
-            cmd_buf,
-            &mesh,
-        );
+        execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh);
         ctx.end_pass(graph);
         // Pass 1
         ctx.begin_pass(graph, pass_1);
-        execute_pass(
-            &mut ctx,
-            elapsed_seconds,
-            uniform_buffer,
-            graph,
-            cmd_buf,
-            &mesh,
-        );
+        execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh);
         ctx.end_pass(graph);
 
         ctx.end_frame();

@@ -17,7 +17,10 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
 
+    // TODO: Move these to the graph builder instead?
     pub texture_list: Vec<InternalTexture>,
+    pub buffer_list: Vec<InternalBuffer>,
+
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
@@ -122,6 +125,7 @@ impl Context {
         // TODO: Move this up?
         let mut texture_list = Vec::new();
         let facade = Facade::new(&basis, &gpu, &window, &mut texture_list);
+        let buffer_list = Vec::new();
 
         // # Allocate command buffers
         let command_buffers = {
@@ -157,6 +161,8 @@ impl Context {
             event_loop: event_loop,
 
             texture_list,
+            buffer_list,
+
             graph_cache: Vec::new(),
             shader_modules,
             command_pool,
@@ -420,7 +426,7 @@ impl Context {
                     "Output texture with handle `{}` not found in context.",
                     handle.0
                 ));
-                (tex.image_view, tex.format)
+                (tex.texture.image_view, tex.texture.format)
             })
             .collect();
         let shader_modules = shader_modules
@@ -441,19 +447,26 @@ impl Context {
                     "Depth texture with handle `{}` not found in the context.",
                     depth_tex_handle.0
                 ));
-            Some((depth_tex.image_view, depth_tex.format))
+            Some((depth_tex.texture.image_view, depth_tex.texture.format))
         } else {
             None
         };
+        let internal_buffer = self.get_buffer_from_hash(uniform_buffer.0).expect(&format!(
+            "Buffer with handle `{}` not found in the context.",
+            uniform_buffer.0
+        ));
 
         graph_builder.passes.push(Pass {
             name: String::from(name),
             outputs,
-            input_texture: (tex.image_view, environment_sampler.vk_sampler),
+            input_texture: (tex.texture.image_view, environment_sampler.vk_sampler),
             opt_depth,
             viewport_width: self.facade.swapchain_width,
             viewport_height: self.facade.swapchain_height,
-            uniform_buffer,
+            uniform_buffer: (
+                internal_buffer.buffer.vk_buffer,
+                internal_buffer.buffer.size,
+            ),
             shader_modules,
         });
 
@@ -465,25 +478,11 @@ impl Context {
         Ok(PassHandle(pass_hash))
     }
 
-    pub fn upload_data<T>(
-        &self,
-        graph_handle: GraphHandle,
-        buffer_handle: BufferHandle,
-        data: &[T],
-    ) {
-        let graph = &self
-            .graph_cache
-            .iter()
-            .find(|(_, hash)| hash.0 == graph_handle.0)
-            .unwrap()
-            .0;
-
-        let hvb = &graph
-            .host_visible_buffers
-            .iter()
-            .find(|(handle, _)| handle.0 == buffer_handle.0)
-            .unwrap()
-            .1;
-        hvb.upload_data(data, 0, &self.gpu);
+    pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {
+        let internal_buffer = self.get_buffer_from_hash(buffer_handle.0).expect(&format!(
+            "A buffer with the hash `{}` not found in the context.",
+            buffer_handle.0
+        ));
+        internal_buffer.buffer.upload_data(data, 0, &self.gpu);
     }
 }
