@@ -119,7 +119,8 @@ fn main() {
         let mut graph_builder = graphene::GraphBuilder::new();
         let uniform_buffer = ctx
             .new_buffer(
-                // TODO: Avoid having the swapchain index, automatically creating a unique uniform buffer per graph.
+                // TODO: Avoid having the swapchain index, automatically
+                // creating a unique uniform buffer per pass and per graph
                 &format!("uniform buffer_{}", ctx.swapchain_idx),
                 std::mem::size_of::<UniformBuffer>(),
                 vk::BufferUsageFlags::UNIFORM_BUFFER,

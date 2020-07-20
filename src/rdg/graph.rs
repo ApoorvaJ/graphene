@@ -6,21 +6,28 @@ pub struct BuiltPass {
     pub descriptor_set: vk::DescriptorSet,
     pub framebuffer: vk::Framebuffer,
     pub render_pass: vk::RenderPass,
+    pub pipeline_layout: vk::PipelineLayout,
+    pub graphics_pipeline: vk::Pipeline,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
 }
 
 pub struct Graph {
     device: ash::Device,
-    descriptor_pool: vk::DescriptorPool, // TODO: What is the granularity of this? Should this be shared across the whole context?
-    pub pipeline_layout: vk::PipelineLayout,
-    pub graphics_pipeline: vk::Pipeline,
+    // TODO: What is the correct granularity of this? Should this be shared
+    // across the whole context?
+    descriptor_pool: vk::DescriptorPool,
     pub built_passes: Vec<BuiltPass>,
-    pub passes: Vec<Pass>,
 }
 
 impl Drop for Graph {
     fn drop(&mut self) {
         unsafe {
             for built_pass in &mut self.built_passes {
+                self.device
+                    .destroy_pipeline(built_pass.graphics_pipeline, None);
+                self.device
+                    .destroy_pipeline_layout(built_pass.pipeline_layout, None);
                 self.device
                     .destroy_descriptor_set_layout(built_pass.descriptor_set_layout, None);
                 self.device
@@ -30,9 +37,6 @@ impl Drop for Graph {
             }
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_pipeline(self.graphics_pipeline, None);
         }
     }
 }
@@ -258,14 +262,6 @@ impl Graph {
             descriptor_sets[0]
         };
 
-        let built_passes = vec![BuiltPass {
-            clear_values,
-            descriptor_set_layout,
-            descriptor_set,
-            framebuffer,
-            render_pass,
-        }];
-
         // # Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
             let main_function_name = CString::new("main").unwrap();
@@ -376,7 +372,7 @@ impl Graph {
                 ..Default::default()
             };
 
-            let set_layouts = [built_passes[0].descriptor_set_layout];
+            let set_layouts = [descriptor_set_layout];
             let pipeline_layout_create_info =
                 vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
 
@@ -426,18 +422,26 @@ impl Graph {
             (graphics_pipelines[0], pipeline_layout)
         };
 
+        let built_passes = vec![BuiltPass {
+            clear_values,
+            descriptor_set_layout,
+            descriptor_set,
+            framebuffer,
+            render_pass,
+            pipeline_layout,
+            graphics_pipeline,
+            viewport_width: pass.viewport_width,
+            viewport_height: pass.viewport_height,
+        }];
+
         Graph {
             device: gpu.device.clone(),
             descriptor_pool,
-            graphics_pipeline,
-            pipeline_layout,
             built_passes,
-            passes: graph_builder.passes,
         }
     }
 
     pub fn begin_pass(&self, _pass_handle: PassHandle, command_buffer: vk::CommandBuffer) {
-        let pass = &self.passes[0];
         let built_pass = &self.built_passes[0];
 
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
@@ -450,8 +454,8 @@ impl Graph {
         }
 
         let extent = vk::Extent2D {
-            width: pass.viewport_width,
-            height: pass.viewport_height,
+            width: built_pass.viewport_width,
+            height: built_pass.viewport_height,
         };
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
@@ -472,7 +476,7 @@ impl Graph {
             self.device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.graphics_pipeline,
+                built_pass.graphics_pipeline,
             );
 
             // Set viewport and scissor
@@ -480,8 +484,8 @@ impl Graph {
                 let viewports = [vk::Viewport {
                     x: 0.0,
                     y: 0.0,
-                    width: pass.viewport_width as f32,
-                    height: pass.viewport_height as f32,
+                    width: built_pass.viewport_width as f32,
+                    height: built_pass.viewport_height as f32,
                     min_depth: 0.0,
                     max_depth: 1.0,
                 }];
@@ -499,7 +503,7 @@ impl Graph {
                 self.device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline_layout,
+                    built_pass.pipeline_layout,
                     0,
                     &sets,
                     &[],
