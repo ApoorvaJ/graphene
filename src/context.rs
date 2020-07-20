@@ -4,7 +4,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
-#[derive(Copy, Clone, Hash)]
+#[derive(Copy, Clone, Debug, Hash)]
 pub struct BufferHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct GraphHandle(pub u64);

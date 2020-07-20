@@ -4,13 +4,13 @@ pub struct BuiltPass {
     pub clear_values: Vec<vk::ClearValue>,
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_set: vk::DescriptorSet,
+    pub framebuffer: vk::Framebuffer,
+    pub render_pass: vk::RenderPass,
 }
 
 pub struct Graph {
     device: ash::Device,
-    descriptor_pool: vk::DescriptorPool,
-    pub render_pass: vk::RenderPass,
-    pub framebuffer: vk::Framebuffer,
+    descriptor_pool: vk::DescriptorPool, // TODO: What is the granularity of this? Should this be shared across the whole context?
     pub pipeline_layout: vk::PipelineLayout,
     pub graphics_pipeline: vk::Pipeline,
     pub built_passes: Vec<BuiltPass>,
@@ -24,14 +24,16 @@ impl Drop for Graph {
             for built_pass in &mut self.built_passes {
                 self.device
                     .destroy_descriptor_set_layout(built_pass.descriptor_set_layout, None);
+                self.device
+                    .destroy_framebuffer(built_pass.framebuffer, None);
+                self.device
+                    .destroy_render_pass(built_pass.render_pass, None);
             }
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_pipeline(self.graphics_pipeline, None);
-            self.device.destroy_framebuffer(self.framebuffer, None);
-            self.device.destroy_render_pass(self.render_pass, None);
         }
     }
 }
@@ -104,7 +106,7 @@ impl Graph {
             unsafe {
                 gpu.device
                     .create_render_pass(&renderpass_create_info, None)
-                    .expect("Failed to create render pass!")
+                    .expect("Failed to create render pass.")
             }
         };
 
@@ -128,7 +130,7 @@ impl Graph {
             unsafe {
                 gpu.device
                     .create_framebuffer(&framebuffer_create_info, None)
-                    .expect("Failed to create Framebuffer!")
+                    .expect("Failed to create framebuffer.")
             }
         };
 
@@ -165,120 +167,119 @@ impl Graph {
         };
 
         // Bake passes
-        let built_passes = {
-            let mut clear_values = Vec::new();
-            // Clear value for depth buffer
-            if pass.opt_depth.is_some() {
-                clear_values.push(vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 1.0,
-                        stencil: 0,
-                    },
-                });
+        let mut clear_values = Vec::new();
+        // Clear value for depth buffer
+        if pass.opt_depth.is_some() {
+            clear_values.push(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            });
+        }
+        // Clear values for color buffer
+        for _ in &pass.outputs {
+            clear_values.push(vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            })
+        }
+
+        // Descriptor set layout
+        let descriptor_set_layout = {
+            let bindings = [
+                vk::DescriptorSetLayoutBinding {
+                    binding: 0,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    descriptor_count: 1,
+                    stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                    p_immutable_samplers: ptr::null(),
+                },
+                vk::DescriptorSetLayoutBinding {
+                    binding: 1,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: 1,
+                    stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                    p_immutable_samplers: ptr::null(),
+                },
+            ];
+
+            let ubo_layout_create_info =
+                vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
+
+            unsafe {
+                gpu.device
+                    .create_descriptor_set_layout(&ubo_layout_create_info, None)
+                    .expect("Failed to create Descriptor Set Layout!")
             }
-            // Clear values for color buffer
-            for _ in &pass.outputs {
-                clear_values.push(vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                })
-            }
-
-            // Descriptor set layout
-            let descriptor_set_layout = {
-                let bindings = [
-                    vk::DescriptorSetLayoutBinding {
-                        binding: 0,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        descriptor_count: 1,
-                        stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                        p_immutable_samplers: ptr::null(),
-                    },
-                    vk::DescriptorSetLayoutBinding {
-                        binding: 1,
-                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                        descriptor_count: 1,
-                        stage_flags: vk::ShaderStageFlags::FRAGMENT,
-                        p_immutable_samplers: ptr::null(),
-                    },
-                ];
-
-                let ubo_layout_create_info =
-                    vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
-
-                unsafe {
-                    gpu.device
-                        .create_descriptor_set_layout(&ubo_layout_create_info, None)
-                        .expect("Failed to create Descriptor Set Layout!")
-                }
-            };
-
-            // Descriptor set
-            let descriptor_set = {
-                let layouts = [descriptor_set_layout];
-                let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
-                    .descriptor_pool(descriptor_pool)
-                    .set_layouts(&layouts);
-                let descriptor_sets = unsafe {
-                    gpu.device
-                        .allocate_descriptor_sets(&descriptor_set_allocate_info)
-                        .expect("Failed to allocate descriptor sets.")
-                };
-                let hvb = &host_visible_buffers
-                    .iter()
-                    .find(|(handle, _)| handle.0 == pass.uniform_buffer.0)
-                    .unwrap()
-                    .1;
-                // let (vk_buffer, buffer_size) = pass.buffer_info;
-                let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-                    buffer: hvb.vk_buffer,
-                    offset: 0,
-                    range: hvb.size as u64,
-                }];
-
-                let (input_image_view, input_sampler) = pass.input_texture;
-                let descriptor_image_info = [vk::DescriptorImageInfo {
-                    sampler: input_sampler,
-                    image_view: input_image_view,
-                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                }];
-
-                let descriptor_write_sets = [
-                    vk::WriteDescriptorSet {
-                        dst_set: descriptor_sets[0],
-                        dst_binding: 0,
-                        dst_array_element: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                        p_buffer_info: descriptor_buffer_info.as_ptr(),
-                        ..Default::default()
-                    },
-                    vk::WriteDescriptorSet {
-                        dst_set: descriptor_sets[0],
-                        dst_binding: 1,
-                        dst_array_element: 0,
-                        descriptor_count: 1,
-                        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                        p_image_info: descriptor_image_info.as_ptr(),
-                        ..Default::default()
-                    },
-                ];
-
-                unsafe {
-                    gpu.device
-                        .update_descriptor_sets(&descriptor_write_sets, &[]);
-                }
-                descriptor_sets[0]
-            };
-
-            let built_passes = vec![BuiltPass {
-                clear_values,
-                descriptor_set_layout,
-                descriptor_set,
-            }];
-            built_passes
         };
+
+        // Descriptor set
+        let descriptor_set = {
+            let layouts = [descriptor_set_layout];
+            let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(descriptor_pool)
+                .set_layouts(&layouts);
+            let descriptor_sets = unsafe {
+                gpu.device
+                    .allocate_descriptor_sets(&descriptor_set_allocate_info)
+                    .expect("Failed to allocate descriptor sets.")
+            };
+            let hvb = &host_visible_buffers
+                .iter()
+                .find(|(handle, _)| handle.0 == pass.uniform_buffer.0)
+                .unwrap()
+                .1;
+            // let (vk_buffer, buffer_size) = pass.buffer_info;
+            let descriptor_buffer_info = [vk::DescriptorBufferInfo {
+                buffer: hvb.vk_buffer,
+                offset: 0,
+                range: hvb.size as u64,
+            }];
+
+            let (input_image_view, input_sampler) = pass.input_texture;
+            let descriptor_image_info = [vk::DescriptorImageInfo {
+                sampler: input_sampler,
+                image_view: input_image_view,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            }];
+
+            let descriptor_write_sets = [
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[0],
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                    p_buffer_info: descriptor_buffer_info.as_ptr(),
+                    ..Default::default()
+                },
+                vk::WriteDescriptorSet {
+                    dst_set: descriptor_sets[0],
+                    dst_binding: 1,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    p_image_info: descriptor_image_info.as_ptr(),
+                    ..Default::default()
+                },
+            ];
+
+            unsafe {
+                gpu.device
+                    .update_descriptor_sets(&descriptor_write_sets, &[]);
+            }
+            descriptor_sets[0]
+        };
+
+        let built_passes = vec![BuiltPass {
+            clear_values,
+            descriptor_set_layout,
+            descriptor_set,
+            framebuffer,
+            render_pass,
+        }];
 
         // # Create graphics pipeline
         let (graphics_pipeline, pipeline_layout) = {
@@ -443,8 +444,6 @@ impl Graph {
         Graph {
             device: gpu.device.clone(),
             descriptor_pool,
-            render_pass,
-            framebuffer,
             graphics_pipeline,
             pipeline_layout,
             built_passes,
@@ -472,8 +471,8 @@ impl Graph {
         };
 
         let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(self.render_pass)
-            .framebuffer(self.framebuffer)
+            .render_pass(built_pass.render_pass)
+            .framebuffer(built_pass.framebuffer)
             .render_area(vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent,

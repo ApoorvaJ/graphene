@@ -1,6 +1,6 @@
 use crate::*;
 
-#[derive(Hash)]
+#[derive(Debug, Hash)]
 pub struct Pass {
     pub name: String,
     pub outputs: Vec<(vk::ImageView, vk::Format)>,

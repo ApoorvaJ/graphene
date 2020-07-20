@@ -12,6 +12,80 @@ struct UniformBuffer {
     elapsed_seconds: f32,
 }
 
+fn execute_pass(
+    ctx: &mut graphene::Context,
+    elapsed_seconds: f32,
+    uniform_buffer: graphene::BufferHandle,
+    graph: graphene::GraphHandle,
+    cmd_buf: vk::CommandBuffer,
+    mesh: &graphene::Mesh,
+) {
+    // Update uniform buffer
+    {
+        let cam_pos = Vec3::new(0.0, -6.0, 0.0);
+        let cam_rot = Quat::from_rotation_z((elapsed_seconds * 1.5).sin() * 0.125 * PI);
+        let obj_pos = Vec3::new(0.0, 0.0, 0.0);
+        let obj_rot = Quat::from_rotation_z(elapsed_seconds * 0.3);
+        let obj_scale = Vec3::new(1.0, 1.0, 1.0);
+
+        let mtx_rot_scale = Mat4::from_quat(obj_rot)
+            * Mat4::from_scale(obj_scale)
+            * Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS);
+        let mtx_obj_to_world = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
+            * Mat4::from_translation(obj_pos)
+            * mtx_rot_scale;
+        let mtx_world_to_view = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
+            * Mat4::from_quat(cam_rot)
+            * Mat4::from_translation(-cam_pos)
+            * Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS);
+        let mtx_view_to_clip = {
+            let width = ctx.facade.swapchain_width;
+            let height = ctx.facade.swapchain_height;
+            Mat4::perspective_lh(
+                60.0 * DEGREES_TO_RADIANS,
+                width as f32 / height as f32,
+                0.01,
+                100.0,
+            )
+        };
+
+        /* This matrix is an orthogonal matrix if scaling is uniform, in
+        which case the inverse transpose is the same as the matrix itself.
+        // Pass 0
+        However, we want to support non-uniform scaling, so we
+        do the inverse transpose. */
+        let mtx_norm_obj_to_world = mtx_rot_scale.inverse().transpose();
+
+        let ubos = [UniformBuffer {
+            mtx_obj_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_obj_to_world,
+            mtx_norm_obj_to_world,
+            elapsed_seconds,
+        }];
+
+        ctx.upload_data(graph, uniform_buffer, &ubos);
+    }
+    // Bind index and vertex buffers
+    unsafe {
+        {
+            let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
+            let offsets = [0_u64];
+            ctx.gpu
+                .device
+                .cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
+            ctx.gpu.device.cmd_bind_index_buffer(
+                cmd_buf,
+                mesh.index_buffer.vk_buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
+        }
+
+        ctx.gpu
+            .device
+            .cmd_draw_indexed(cmd_buf, mesh.index_buffer.num_elements as u32, 1, 0, 0, 0);
+    }
+}
+
 fn main() {
     let mut ctx = graphene::Context::new();
     let start_instant = std::time::Instant::now();
@@ -40,6 +114,7 @@ fn main() {
         }
 
         let elapsed_seconds = start_instant.elapsed().as_secs_f32();
+        let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
 
         // Build and execute render graph
         let mut graph_builder = graphene::GraphBuilder::new();
@@ -58,79 +133,41 @@ fn main() {
                 &environment_sampler,
             )
             .unwrap();
+        let pass_1 = ctx
+            .add_pass(
+                &mut graph_builder,
+                "forward lit 2",
+                &vec![ctx.facade.swapchain_textures[ctx.swapchain_idx]],
+                Some(depth_texture),
+                &ctx.shader_modules,
+                uniform_buffer,
+                environment_texture,
+                &environment_sampler,
+            )
+            .unwrap();
 
-        let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
         let graph = ctx.build_graph(graph_builder);
+        // Pass 0
         ctx.begin_pass(graph, pass_0);
-        // Update uniform buffer
-        {
-            let cam_pos = Vec3::new(0.0, -6.0, 0.0);
-            let cam_rot = Quat::from_rotation_z((elapsed_seconds * 1.5).sin() * 0.125 * PI);
-            let obj_pos = Vec3::new(0.0, 0.0, 0.0);
-            let obj_rot = Quat::from_rotation_z(elapsed_seconds * 0.3);
-            let obj_scale = Vec3::new(1.0, 1.0, 1.0);
-
-            let mtx_rot_scale = Mat4::from_quat(obj_rot)
-                * Mat4::from_scale(obj_scale)
-                * Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS);
-            let mtx_obj_to_world = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
-                * Mat4::from_translation(obj_pos)
-                * mtx_rot_scale;
-            let mtx_world_to_view = Mat4::from_rotation_x(90.0 * DEGREES_TO_RADIANS)
-                * Mat4::from_quat(cam_rot)
-                * Mat4::from_translation(-cam_pos)
-                * Mat4::from_rotation_x(-90.0 * DEGREES_TO_RADIANS);
-            let mtx_view_to_clip = {
-                let width = ctx.facade.swapchain_width;
-                let height = ctx.facade.swapchain_height;
-                Mat4::perspective_lh(
-                    60.0 * DEGREES_TO_RADIANS,
-                    width as f32 / height as f32,
-                    0.01,
-                    100.0,
-                )
-            };
-
-            /* This matrix is an orthogonal matrix if scaling is uniform, in
-            which case the inverse transpose is the same as the matrix itself.
-            However, we want to support non-uniform scaling, so we
-            do the inverse transpose. */
-            let mtx_norm_obj_to_world = mtx_rot_scale.inverse().transpose();
-
-            let ubos = [UniformBuffer {
-                mtx_obj_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_obj_to_world,
-                mtx_norm_obj_to_world,
-                elapsed_seconds,
-            }];
-
-            ctx.upload_data(graph, uniform_buffer, &ubos);
-        }
-
-        unsafe {
-            // Bind index and vertex buffers
-            {
-                let vertex_buffers = [mesh.vertex_buffer.vk_buffer];
-                let offsets = [0_u64];
-                ctx.gpu
-                    .device
-                    .cmd_bind_vertex_buffers(cmd_buf, 0, &vertex_buffers, &offsets);
-                ctx.gpu.device.cmd_bind_index_buffer(
-                    cmd_buf,
-                    mesh.index_buffer.vk_buffer,
-                    0,
-                    vk::IndexType::UINT32,
-                );
-            }
-
-            ctx.gpu.device.cmd_draw_indexed(
-                cmd_buf,
-                mesh.index_buffer.num_elements as u32,
-                1,
-                0,
-                0,
-                0,
-            );
-        }
+        execute_pass(
+            &mut ctx,
+            elapsed_seconds,
+            uniform_buffer,
+            graph,
+            cmd_buf,
+            &mesh,
+        );
+        ctx.end_pass(graph);
+        // Pass 1
+        ctx.begin_pass(graph, pass_1);
+        execute_pass(
+            &mut ctx,
+            elapsed_seconds,
+            uniform_buffer,
+            graph,
+            cmd_buf,
+            &mesh,
+        );
         ctx.end_pass(graph);
 
         ctx.end_frame();
