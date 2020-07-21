@@ -294,20 +294,37 @@ impl Context {
 
         self.swapchain_idx = opt_frame_idx.unwrap();
 
+        let cmd_buf = self.command_buffers[self.swapchain_idx];
+        // Reset command buffer
         unsafe {
             self.gpu
                 .device
-                .reset_command_buffer(
-                    self.command_buffers[self.swapchain_idx],
-                    vk::CommandBufferResetFlags::empty(),
-                )
+                .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::empty())
                 .unwrap();
+        }
+        // Begin command buffer. TODO: Is this in the right place?
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
+
+        unsafe {
+            self.gpu
+                .device
+                .begin_command_buffer(cmd_buf, &command_buffer_begin_info)
+                .expect("Failed to begin recording command buffer.");
         }
 
         is_running
     }
 
     pub fn end_frame(&mut self) {
+        // End command buffer. TODO: Is this in the right place?
+        unsafe {
+            self.gpu
+                .device
+                .end_command_buffer(self.command_buffers[self.swapchain_idx])
+                .expect("Failed to end recording command buffer.");
+        }
+
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let wait_semaphores = [self.facade.image_available_semaphores[self.sync_idx]];
         let signal_semaphores = [self.facade.render_finished_semaphores[self.sync_idx]];

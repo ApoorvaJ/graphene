@@ -454,15 +454,6 @@ impl Graph {
                 pass_handle.0
             ));
 
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);
-
-        unsafe {
-            self.device
-                .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-                .expect("Failed to begin recording command buffer.");
-        }
-
         let extent = vk::Extent2D {
             width: built_pass.viewport_width,
             height: built_pass.viewport_height,
@@ -525,10 +516,6 @@ impl Graph {
     pub fn end_pass(&self, command_buffer: vk::CommandBuffer) {
         unsafe {
             self.device.cmd_end_render_pass(command_buffer);
-
-            self.device
-                .end_command_buffer(command_buffer)
-                .expect("Failed to end recording command buffer.");
         }
     }
 }
