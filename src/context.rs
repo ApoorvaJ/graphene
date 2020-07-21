@@ -8,7 +8,7 @@ use winit::platform::desktop::EventLoopExtDesktop;
 pub struct BufferHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct GraphHandle(pub u64);
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq)]
 pub struct PassHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct TextureHandle(pub u64);
@@ -456,7 +456,7 @@ impl Context {
             uniform_buffer.0
         ));
 
-        graph_builder.passes.push(Pass {
+        let pass = Pass {
             name: String::from(name),
             outputs,
             input_texture: (tex.texture.image_view, environment_sampler.vk_sampler),
@@ -468,14 +468,17 @@ impl Context {
                 internal_buffer.buffer.size,
             ),
             shader_modules,
-        });
-
-        let pass_hash: u64 = {
-            let mut hasher = DefaultHasher::new();
-            graph_builder.passes[graph_builder.passes.len() - 1].hash(&mut hasher);
-            hasher.finish()
         };
-        Ok(PassHandle(pass_hash))
+
+        let pass_handle = {
+            let mut hasher = DefaultHasher::new();
+            pass.hash(&mut hasher);
+            PassHandle(hasher.finish())
+        };
+
+        graph_builder.passes.push((pass_handle, pass));
+
+        Ok(pass_handle)
     }
 
     pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {

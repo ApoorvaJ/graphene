@@ -1,6 +1,7 @@
 use crate::*;
 
 pub struct BuiltPass {
+    pub pass_handle: PassHandle,
     pub clear_values: Vec<vk::ClearValue>,
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_set: vk::DescriptorSet,
@@ -68,7 +69,7 @@ impl Graph {
         };
 
         let mut built_passes = Vec::new();
-        for pass in graph_builder.passes {
+        for (pass_handle, pass) in graph_builder.passes {
             /* Create render pass */
             let render_pass = {
                 let mut attachments: Vec<vk::AttachmentDescription> = Vec::new();
@@ -423,6 +424,7 @@ impl Graph {
             };
 
             built_passes.push(BuiltPass {
+                pass_handle,
                 clear_values,
                 descriptor_set_layout,
                 descriptor_set,
@@ -442,8 +444,15 @@ impl Graph {
         }
     }
 
-    pub fn begin_pass(&self, _pass_handle: PassHandle, command_buffer: vk::CommandBuffer) {
-        let built_pass = &self.built_passes[0];
+    pub fn begin_pass(&self, pass_handle: PassHandle, command_buffer: vk::CommandBuffer) {
+        let built_pass = self
+            .built_passes
+            .iter()
+            .find(|&p| p.pass_handle == pass_handle)
+            .expect(&format!(
+                "Pass with handle `{}` not found in graph.",
+                pass_handle.0
+            ));
 
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::SIMULTANEOUS_USE);

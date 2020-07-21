@@ -14,7 +14,7 @@ pub struct Pass {
 
 #[derive(Hash)]
 pub struct GraphBuilder {
-    pub passes: Vec<Pass>,
+    pub passes: Vec<(PassHandle, Pass)>,
     pub buffers: Vec<BufferHandle>,
 }
 
