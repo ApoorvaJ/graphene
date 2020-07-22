@@ -90,6 +90,7 @@ fn main() {
     let start_instant = std::time::Instant::now();
 
     let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
+    let mesh2 = graphene::Mesh::load("assets/meshes/sphere.glb", &ctx.gpu, ctx.command_pool);
     let depth_texture = ctx
         .new_texture_relative_size(
             "depth",
@@ -158,7 +159,7 @@ fn main() {
         ctx.end_pass(graph);
         // Pass 1
         ctx.begin_pass(graph, pass_1);
-        execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh);
+        execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh2);
         ctx.end_pass(graph);
 
         ctx.end_frame();
