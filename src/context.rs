@@ -4,6 +4,8 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::desktop::EventLoopExtDesktop;
 
+const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
+
 #[derive(Copy, Clone, Debug, Hash)]
 pub struct BufferHandle(pub u64);
 #[derive(Copy, Clone)]
@@ -33,7 +35,7 @@ pub struct Context {
 
     pub command_buffers: Vec<vk::CommandBuffer>,
     pub facade: Facade, // Resolution-dependent apparatus
-    pub debug_marker: DebugMarker,
+    pub debug_utils: DebugUtils,
     pub gpu: Gpu,
     pub basis: Basis,
 }
@@ -86,6 +88,8 @@ impl Context {
                     tex.texture.format,
                     tex.texture.usage,
                     tex.texture.aspect_flags,
+                    &tex.texture.name,
+                    &self.debug_utils,
                 );
             }
         }
@@ -107,7 +111,7 @@ impl Context {
 
         let basis = Basis::new(APP_NAME, &window);
         let gpu = Gpu::new(&basis);
-        let debug_marker = DebugMarker::new(&basis, &gpu);
+        let debug_utils = DebugUtils::new(&basis, &gpu, ENABLE_DEBUG_MESSENGER_CALLBACK);
 
         // # Create command pool
         let command_pool = {
@@ -175,7 +179,7 @@ impl Context {
 
             command_buffers,
             facade,
-            debug_marker,
+            debug_utils,
             gpu,
             basis,
         }

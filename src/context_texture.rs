@@ -9,7 +9,6 @@ pub enum TextureKind {
 
 pub struct InternalTexture {
     pub handle: TextureHandle,
-    pub name: String,
     pub texture: Texture,
     pub kind: TextureKind,
 }
@@ -43,10 +42,18 @@ impl Context {
         // Create new texture
         let w = (self.facade.swapchain_width as f32 * scale) as u32;
         let h = (self.facade.swapchain_height as f32 * scale) as u32;
-        let tex = Texture::new(&self.gpu, w, h, format, usage, aspect_flags);
+        let tex = Texture::new(
+            &self.gpu,
+            w,
+            h,
+            format,
+            usage,
+            aspect_flags,
+            name,
+            &self.debug_utils,
+        );
         self.texture_list.push(InternalTexture {
             handle: TextureHandle(new_hash),
-            name: String::from(name),
             texture: tex,
             kind: TextureKind::RelativeSized { scale },
         });
@@ -73,11 +80,15 @@ impl Context {
             ));
         }
         // Create new texture
-        let tex =
-            Texture::new_from_image(&self.gpu, std::path::Path::new(&path), self.command_pool);
+        let tex = Texture::new_from_image(
+            &self.gpu,
+            std::path::Path::new(&path),
+            self.command_pool,
+            name,
+            &self.debug_utils,
+        );
         self.texture_list.push(InternalTexture {
             handle: TextureHandle(new_hash),
-            name: String::from(name),
             texture: tex,
             kind: TextureKind::AbsoluteSized,
         });

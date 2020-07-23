@@ -9,6 +9,7 @@ pub struct Texture {
     pub image: vk::Image,
     pub image_view: vk::ImageView,
     pub opt_device_memory: Option<vk::DeviceMemory>, // None if we didn't manually allocate memory, e.g. in the case of swapchain images
+    pub name: String,
     pub device: ash::Device,
 }
 
@@ -32,6 +33,8 @@ impl Texture {
         format: vk::Format,
         usage: vk::ImageUsageFlags,
         aspect_flags: vk::ImageAspectFlags,
+        name: &str,
+        debug_marker: &DebugUtils,
     ) -> Texture {
         let device = gpu.device.clone();
 
@@ -105,6 +108,8 @@ impl Texture {
             }
         };
 
+        debug_marker.set_image_name(image, name);
+
         Texture {
             width,
             height,
@@ -115,6 +120,7 @@ impl Texture {
             image_view,
             opt_device_memory: Some(device_memory),
             device,
+            name: String::from(name),
         }
     }
 
@@ -190,6 +196,8 @@ impl Texture {
         gpu: &Gpu,
         path: &std::path::Path,
         command_pool: vk::CommandPool,
+        name: &str,
+        debug_utils: &DebugUtils,
     ) -> Texture {
         use image::GenericImageView;
         let mut image_object = image::open(path).unwrap();
@@ -211,6 +219,8 @@ impl Texture {
             vk::Format::R8G8B8A8_UNORM, // TODO: Derive format from file or take as an argument
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             vk::ImageAspectFlags::COLOR,
+            name,
+            debug_utils,
         );
 
         let staging_buffer =

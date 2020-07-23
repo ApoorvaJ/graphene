@@ -1,18 +1,15 @@
 use crate::*;
 use ash::vk_make_version;
 use std::os::raw::c_char;
-use std::os::raw::c_void;
 use winit::window::Window;
 
 pub struct Basis {
-    pub _entry: ash::Entry,
+    pub entry: ash::Entry,
     pub instance: ash::Instance,
     pub surface: vk::SurfaceKHR,
     pub validation_layers: Vec<String>,
-    pub debug_messenger: vk::DebugUtilsMessengerEXT,
 
     // - Extensions
-    pub ext_debug_utils: ash::extensions::ext::DebugUtils,
     pub ext_surface: ash::extensions::khr::Surface,
 }
 
@@ -20,10 +17,6 @@ impl Drop for Basis {
     fn drop(&mut self) {
         unsafe {
             self.ext_surface.destroy_surface(self.surface, None);
-            if !self.validation_layers.is_empty() {
-                self.ext_debug_utils
-                    .destroy_debug_utils_messenger(self.debug_messenger, None);
-            }
             self.instance.destroy_instance(None);
         }
     }
@@ -31,7 +24,6 @@ impl Drop for Basis {
 
 impl Basis {
     pub fn new(app_name: &str, window: &Window) -> Basis {
-        const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
         let validation_layers = vec![String::from("VK_LAYER_KHRONOS_validation")];
 
         // # Init Ash
@@ -95,35 +87,6 @@ impl Basis {
             instance
         };
 
-        // # Debug messenger callback
-        let ext_debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-        let debug_messenger = {
-            if !ENABLE_DEBUG_MESSENGER_CALLBACK {
-                ash::vk::DebugUtilsMessengerEXT::null()
-            } else {
-                let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT {
-                    s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-                    p_next: ptr::null(),
-                    flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
-                    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
-            // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
-            // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
-            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                    message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-                    pfn_user_callback: Some(vulkan_debug_utils_callback),
-                    p_user_data: ptr::null_mut(),
-                };
-
-                unsafe {
-                    ext_debug_utils
-                        .create_debug_utils_messenger(&messenger_ci, None)
-                        .expect("Debug Utils Callback")
-                }
-            }
-        };
-
         // # Create surface
         let ext_surface = ash::extensions::khr::Surface::new(&entry, &instance);
         let surface = unsafe {
@@ -135,36 +98,8 @@ impl Basis {
             instance,
             surface,
             validation_layers,
-            debug_messenger,
-            _entry: entry,
-            ext_debug_utils,
+            entry,
             ext_surface,
         }
     }
-}
-
-// Debug callbacks
-unsafe extern "system" fn vulkan_debug_utils_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut c_void,
-) -> vk::Bool32 {
-    let severity = match message_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[Verbose]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[Warning]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[Error]",
-        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[Info]",
-        _ => "[Unknown]",
-    };
-    let types = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General]",
-        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]",
-        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]",
-        _ => "[Unknown]",
-    };
-    let message = CStr::from_ptr((*p_callback_data).p_message);
-    println!("[Debug]{}{}{:?}", severity, types, message);
-
-    vk::FALSE
 }

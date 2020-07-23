@@ -166,6 +166,13 @@ impl Facade {
         // Add swapchain textures to the context's texture list
         let swapchain_textures = (0..num_frames)
             .map(|i| {
+                let name = String::from(&format!("swapchain_{}", i));
+                let hash: u64 = {
+                    let mut hasher = DefaultHasher::new();
+                    name.hash(&mut hasher);
+                    hasher.finish()
+                };
+                let handle = TextureHandle(hash);
                 let texture = Texture {
                     width: swapchain_extent.width,
                     height: swapchain_extent.height,
@@ -176,17 +183,10 @@ impl Facade {
                     image_view: swapchain_imageviews[i as usize],
                     opt_device_memory: None, // This memory is not allocated by us. It is part of the swapchain.
                     device: device.clone(),
+                    name,
                 };
-                let name = String::from(&format!("swapchain_{}", i));
-                let hash: u64 = {
-                    let mut hasher = DefaultHasher::new();
-                    name.hash(&mut hasher);
-                    hasher.finish()
-                };
-                let handle = TextureHandle(hash);
                 texture_list.push(InternalTexture {
                     handle,
-                    name,
                     texture,
                     kind: TextureKind::Swapchain,
                 });
