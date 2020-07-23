@@ -100,6 +100,15 @@ fn main() {
             vk::ImageAspectFlags::DEPTH,
         )
         .unwrap();
+    let temp_texture = ctx
+        .new_texture_relative_size(
+            "temp",
+            1.0,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            vk::ImageAspectFlags::COLOR,
+        )
+        .unwrap();
     let environment_sampler = graphene::Sampler::new(&ctx.gpu);
     let environment_texture = ctx
         .new_texture_from_file(
@@ -131,7 +140,7 @@ fn main() {
             .add_pass(
                 &mut graph_builder,
                 "forward lit",
-                &vec![ctx.facade.swapchain_textures[ctx.swapchain_idx]],
+                &vec![temp_texture],
                 Some(depth_texture),
                 &ctx.shader_modules,
                 uniform_buffer,
