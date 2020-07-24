@@ -1,7 +1,5 @@
 #version 450
 
-#extension GL_ARB_separate_shader_objects : enable
-
 layout(set = 0, binding = 0) uniform UniformBuffer {
     mat4 mtx_obj_to_clip;
     mat4 mtx_norm_obj_to_world;
