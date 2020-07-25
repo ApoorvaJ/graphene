@@ -223,9 +223,13 @@ impl Texture {
             debug_utils,
         );
 
-        let staging_buffer =
-            HostVisibleBuffer::new(image_size, vk::BufferUsageFlags::TRANSFER_SRC, gpu);
-        staging_buffer.upload_data(&image_data, 0, gpu);
+        let staging_buffer = HostVisibleBuffer::new(
+            "image_staging_buffer",
+            image_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            gpu,
+        );
+        staging_buffer.upload_data(&image_data, 0);
 
         texture.transition_image_layout(
             vk::ImageLayout::UNDEFINED,

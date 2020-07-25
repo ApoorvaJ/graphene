@@ -6,7 +6,7 @@ use winit::platform::desktop::EventLoopExtDesktop;
 
 const ENABLE_DEBUG_MESSENGER_CALLBACK: bool = true;
 
-#[derive(Copy, Clone, Debug, Hash)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq)]
 pub struct BufferHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct GraphHandle(pub u64);
@@ -24,7 +24,7 @@ pub struct Context {
     pub shader_list: ShaderList,
     // TODO: Move these to the graph builder instead?
     pub texture_list: Vec<InternalTexture>,
-    pub buffer_list: Vec<InternalBuffer>,
+    pub buffer_list: BufferList,
 
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
     pub command_pool: vk::CommandPool,
@@ -129,7 +129,7 @@ impl Context {
         // TODO: Move this up?
         let mut texture_list = Vec::new();
         let facade = Facade::new(&basis, &gpu, &window, &mut texture_list);
-        let buffer_list = Vec::new();
+        let buffer_list = BufferList::new();
 
         // # Allocate command buffers
         let command_buffers = {
@@ -199,7 +199,12 @@ impl Context {
             // The requested graph doesn't exist. Build it and add it to the cache.
             println!("Adding graph to cache");
             self.graph_cache.push((
-                Graph::new(graph_builder, &self.gpu, &self.shader_list),
+                Graph::new(
+                    graph_builder,
+                    &self.gpu,
+                    &self.shader_list,
+                    &self.buffer_list,
+                ),
                 GraphHandle(req_hash),
             ));
         }
@@ -458,10 +463,6 @@ impl Context {
         } else {
             None
         };
-        let internal_buffer = self.get_buffer_from_hash(uniform_buffer.0).expect(&format!(
-            "Buffer with handle `{}` not found in the context.",
-            uniform_buffer.0
-        ));
 
         let pass = Pass {
             name: String::from(name),
@@ -472,10 +473,7 @@ impl Context {
             opt_depth,
             viewport_width: self.facade.swapchain_width,
             viewport_height: self.facade.swapchain_height,
-            uniform_buffer: (
-                internal_buffer.buffer.vk_buffer,
-                internal_buffer.buffer.size,
-            ),
+            uniform_buffer,
         };
 
         let pass_handle = {
@@ -489,14 +487,7 @@ impl Context {
         Ok(pass_handle)
     }
 
-    pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {
-        let internal_buffer = self.get_buffer_from_hash(buffer_handle.0).expect(&format!(
-            "A buffer with the hash `{}` not found in the context.",
-            buffer_handle.0
-        ));
-        internal_buffer.buffer.upload_data(data, 0, &self.gpu);
-    }
-
+    /* Shaders */
     pub fn new_shader(
         &mut self,
         name: &str,
@@ -504,5 +495,19 @@ impl Context {
         path: &str,
     ) -> Result<ShaderHandle, String> {
         self.shader_list.new_shader(name, shader_stage, path)
+    }
+
+    /* Buffers */
+    pub fn new_buffer(
+        &mut self,
+        name: &str,
+        size: usize,
+        usage: vk::BufferUsageFlags,
+    ) -> Result<BufferHandle, String> {
+        self.buffer_list.new_buffer(name, size, usage, &self.gpu)
+    }
+
+    pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {
+        self.buffer_list.upload_data(buffer_handle, data);
     }
 }

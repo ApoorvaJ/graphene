@@ -26,10 +26,15 @@ impl DeviceLocalBuffer {
         let size = std::mem::size_of_val(data);
 
         // ## Create staging buffer in host-visible memory
-        let staging_buffer = HostVisibleBuffer::new(size, vk::BufferUsageFlags::TRANSFER_SRC, &gpu);
+        let staging_buffer = HostVisibleBuffer::new(
+            "device_local_staging_buffer",
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            &gpu,
+        );
 
         // ## Copy data to staging buffer
-        staging_buffer.upload_data(data, 0, gpu);
+        staging_buffer.upload_data(data, 0);
 
         // ## Create buffer in device-local memory
         let (vk_buffer, memory) = super::new_raw_buffer(

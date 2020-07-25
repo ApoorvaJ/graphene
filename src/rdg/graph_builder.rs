@@ -10,20 +10,16 @@ pub struct Pass {
     pub opt_depth: Option<(vk::ImageView, vk::Format)>,
     pub viewport_width: u32,
     pub viewport_height: u32,
-    pub uniform_buffer: (vk::Buffer, usize),
+    pub uniform_buffer: BufferHandle,
 }
 
 #[derive(Hash)]
 pub struct GraphBuilder {
     pub passes: Vec<(PassHandle, Pass)>,
-    pub buffers: Vec<BufferHandle>,
 }
 
 impl GraphBuilder {
     pub fn new() -> GraphBuilder {
-        GraphBuilder {
-            passes: Vec::new(),
-            buffers: Vec::new(),
-        }
+        GraphBuilder { passes: Vec::new() }
     }
 }

@@ -44,7 +44,12 @@ impl Drop for Graph {
 }
 
 impl Graph {
-    pub fn new(graph_builder: GraphBuilder, gpu: &Gpu, shader_list: &ShaderList) -> Graph {
+    pub fn new(
+        graph_builder: GraphBuilder,
+        gpu: &Gpu,
+        shader_list: &ShaderList,
+        buffer_list: &BufferList,
+    ) -> Graph {
         // Create descriptor pool
         let descriptor_pool = {
             let pool_sizes = [
@@ -229,10 +234,17 @@ impl Graph {
                         .allocate_descriptor_sets(&descriptor_set_allocate_info)
                         .expect("Failed to allocate descriptor sets.")
                 };
+
+                let uniform_buffer = buffer_list
+                    .get_buffer_from_handle(pass.uniform_buffer)
+                    .expect(&format!(
+                        "Uniform buffer with handle `{:?}` not found in the context.",
+                        pass.uniform_buffer
+                    ));
                 let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-                    buffer: pass.uniform_buffer.0,
+                    buffer: uniform_buffer.vk_buffer,
                     offset: 0,
-                    range: pass.uniform_buffer.1 as u64,
+                    range: uniform_buffer.size as u64,
                 }];
 
                 let (input_image_view, input_sampler) = pass.input_texture;
