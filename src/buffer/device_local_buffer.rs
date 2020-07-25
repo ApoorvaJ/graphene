@@ -18,6 +18,7 @@ impl Drop for DeviceLocalBuffer {
 
 impl DeviceLocalBuffer {
     pub fn new<T>(
+        name: &str,
         data: &[T],
         usage: vk::BufferUsageFlags,
         gpu: &Gpu,
@@ -67,6 +68,8 @@ impl DeviceLocalBuffer {
 
             end_single_use_command_buffer(command_buffer, command_pool, &gpu);
         }
+
+        debug_utils.set_buffer_name(vk_buffer, name);
 
         DeviceLocalBuffer {
             vk_buffer,

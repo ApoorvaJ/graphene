@@ -9,6 +9,7 @@ pub struct Mesh {
 
 impl Mesh {
     pub fn load(
+        name: &str,
         path: &str,
         gpu: &Gpu,
         command_pool: vk::CommandPool,
@@ -58,6 +59,7 @@ impl Mesh {
 
         // # Create and upload the vertex buffer
         let vertex_buffer = DeviceLocalBuffer::new(
+            &format!("buffer_{}_mesh_vertex", name),
             &vertices_data,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             gpu,
@@ -67,6 +69,7 @@ impl Mesh {
 
         // # Create and upload index buffer
         let index_buffer = DeviceLocalBuffer::new(
+            &format!("buffer_{}_mesh_index", name),
             &indices_data,
             vk::BufferUsageFlags::INDEX_BUFFER,
             gpu,

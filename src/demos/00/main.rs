@@ -91,12 +91,14 @@ fn main() {
 
     // TODO: Having to pass in debug_utils here is a little messy. Streamline.
     let mesh = graphene::Mesh::load(
+        "suzanne",
         "assets/meshes/suzanne.glb",
         &ctx.gpu,
         ctx.command_pool,
         &ctx.debug_utils,
     );
     let mesh2 = graphene::Mesh::load(
+        "sphere",
         "assets/meshes/sphere.glb",
         &ctx.gpu,
         ctx.command_pool,
