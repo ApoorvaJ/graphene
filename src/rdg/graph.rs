@@ -19,6 +19,7 @@ pub struct Graph {
     // across the whole context?
     descriptor_pool: vk::DescriptorPool,
     pub built_passes: Vec<BuiltPass>,
+    pub shader_handles: Vec<ShaderHandle>, // Needed for shader hot reloading
 }
 
 impl Drop for Graph {
@@ -43,7 +44,7 @@ impl Drop for Graph {
 }
 
 impl Graph {
-    pub fn new(graph_builder: GraphBuilder, gpu: &Gpu) -> Graph {
+    pub fn new(graph_builder: GraphBuilder, gpu: &Gpu, shader_list: &ShaderList) -> Graph {
         // Create descriptor pool
         let descriptor_pool = {
             let pool_sizes = [
@@ -68,8 +69,14 @@ impl Graph {
             }
         };
 
+        let mut shader_handles = Vec::new();
         let mut built_passes = Vec::new();
         for (pass_handle, pass) in graph_builder.passes {
+            /* Record which shader handles have been used. This is needed for
+            hot-reloading shaders. */
+            shader_handles.push(pass.vertex_shader);
+            shader_handles.push(pass.fragment_shader);
+
             /* Create render pass */
             let render_pass = {
                 let mut attachments: Vec<vk::AttachmentDescription> = Vec::new();
@@ -266,16 +273,28 @@ impl Graph {
             /* Create graphics pipeline and pipeline layout */
             let (graphics_pipeline, pipeline_layout) = {
                 let main_function_name = CString::new("main").unwrap();
+                let vertex_shader = shader_list
+                    .get_shader_from_handle(pass.vertex_shader)
+                    .expect(&format!(
+                        "Vertex shader with handle `{}` not found in the context.",
+                        pass.vertex_shader.0
+                    ));
+                let fragment_shader = shader_list
+                    .get_shader_from_handle(pass.fragment_shader)
+                    .expect(&format!(
+                        "Fragment shader with handle `{}` not found in the context.",
+                        pass.fragment_shader.0
+                    ));
                 let shader_stages = [
                     vk::PipelineShaderStageCreateInfo {
                         stage: vk::ShaderStageFlags::VERTEX,
-                        module: pass.shader_modules[0],
+                        module: vertex_shader.vk_shader_module,
                         p_name: main_function_name.as_ptr(),
                         ..Default::default()
                     },
                     vk::PipelineShaderStageCreateInfo {
                         stage: vk::ShaderStageFlags::FRAGMENT,
-                        module: pass.shader_modules[1],
+                        module: fragment_shader.vk_shader_module,
                         p_name: main_function_name.as_ptr(),
                         ..Default::default()
                     },
@@ -441,6 +460,7 @@ impl Graph {
             device: gpu.device.clone(),
             descriptor_pool,
             built_passes,
+            shader_handles,
         }
     }
 

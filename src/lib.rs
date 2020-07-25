@@ -22,6 +22,8 @@ pub mod rdg;
 pub use rdg::*;
 pub mod sampler;
 pub use sampler::*;
+pub mod shader_list;
+pub use shader_list::*;
 pub mod texture;
 pub use texture::*;
 pub mod utils;

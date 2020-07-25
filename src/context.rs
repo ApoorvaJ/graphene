@@ -14,17 +14,19 @@ pub struct GraphHandle(pub u64);
 pub struct PassHandle(pub u64);
 #[derive(Copy, Clone)]
 pub struct TextureHandle(pub u64);
+#[derive(Copy, Clone, Debug, Hash, PartialEq)]
+pub struct ShaderHandle(pub u64);
 
 pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
 
+    pub shader_list: ShaderList,
     // TODO: Move these to the graph builder instead?
     pub texture_list: Vec<InternalTexture>,
     pub buffer_list: Vec<InternalBuffer>,
 
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
-    pub shader_modules: Vec<vk::ShaderModule>,
     pub command_pool: vk::CommandPool,
 
     pub sync_idx: usize,      // Index of the synchronization primitives
@@ -56,10 +58,6 @@ impl Drop for Context {
                 .destroy_command_pool(self.command_pool, None);
 
             self.facade.destroy(&mut self.texture_list);
-
-            for stage in &self.shader_modules {
-                self.gpu.device.destroy_shader_module(*stage, None);
-            }
         }
     }
 }
@@ -126,6 +124,8 @@ impl Context {
             }
         };
 
+        let shader_list = ShaderList::new(gpu.device.clone());
+
         // TODO: Move this up?
         let mut texture_list = Vec::new();
         let facade = Facade::new(&basis, &gpu, &window, &mut texture_list);
@@ -145,9 +145,6 @@ impl Context {
             }
         };
 
-        let (shader_modules, _) =
-            utils::get_shader_modules(&gpu).expect("Failed to load shader modules");
-
         // Add expect messages to all these unwraps
         let (watcher, watch_rx) = {
             use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -164,11 +161,11 @@ impl Context {
             window,
             event_loop: event_loop,
 
+            shader_list,
             texture_list,
             buffer_list,
 
             graph_cache: Vec::new(),
-            shader_modules,
             command_pool,
 
             sync_idx: 0,
@@ -201,8 +198,10 @@ impl Context {
         if opt_idx.is_none() {
             // The requested graph doesn't exist. Build it and add it to the cache.
             println!("Adding graph to cache");
-            self.graph_cache
-                .push((Graph::new(graph_builder, &self.gpu), GraphHandle(req_hash)));
+            self.graph_cache.push((
+                Graph::new(graph_builder, &self.gpu, &self.shader_list),
+                GraphHandle(req_hash),
+            ));
         }
 
         GraphHandle(req_hash)
@@ -393,17 +392,7 @@ impl Context {
                             .device_wait_idle()
                             .expect("Failed to wait device idle!");
                     }
-                    if let Some((shader_modules, _num_changed)) =
-                        utils::get_shader_modules(&self.gpu)
-                    {
-                        // TODO: Wrap shader modules with a struct with a drop trait, and then delete this loop
-                        unsafe {
-                            for stage in &self.shader_modules {
-                                self.gpu.device.destroy_shader_module(*stage, None);
-                            }
-                        }
-                        self.shader_modules = shader_modules;
-                    }
+                    self.shader_list.hot_reload(&mut self.graph_cache);
                 }
                 _ => (),
             }
@@ -432,9 +421,10 @@ impl Context {
         &self,
         graph_builder: &mut GraphBuilder,
         name: &str,
+        vertex_shader: ShaderHandle,
+        fragment_shader: ShaderHandle,
         output_texs: &Vec<TextureHandle>,
         opt_depth_tex: Option<TextureHandle>,
-        shader_modules: &[vk::ShaderModule],
         uniform_buffer: BufferHandle,
         texture_handle: TextureHandle,
         environment_sampler: &Sampler,
@@ -449,10 +439,6 @@ impl Context {
                 ));
                 (tex.texture.image_view, tex.texture.format)
             })
-            .collect();
-        let shader_modules = shader_modules
-            .iter()
-            .map(|shader_module| *shader_module)
             .collect();
 
         let tex = self
@@ -479,6 +465,8 @@ impl Context {
 
         let pass = Pass {
             name: String::from(name),
+            vertex_shader,
+            fragment_shader,
             outputs,
             input_texture: (tex.texture.image_view, environment_sampler.vk_sampler),
             opt_depth,
@@ -488,7 +476,6 @@ impl Context {
                 internal_buffer.buffer.vk_buffer,
                 internal_buffer.buffer.size,
             ),
-            shader_modules,
         };
 
         let pass_handle = {
@@ -508,5 +495,14 @@ impl Context {
             buffer_handle.0
         ));
         internal_buffer.buffer.upload_data(data, 0, &self.gpu);
+    }
+
+    pub fn new_shader(
+        &mut self,
+        name: &str,
+        shader_stage: ShaderStage,
+        path: &str,
+    ) -> Result<ShaderHandle, String> {
+        self.shader_list.new_shader(name, shader_stage, path)
     }
 }

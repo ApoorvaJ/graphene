@@ -117,11 +117,27 @@ fn main() {
         )
         .unwrap();
 
-    // TODO: Remove this and implement a shader API
-    let shader_modules = vec![
-        vec![ctx.shader_modules[0], ctx.shader_modules[1]],
-        vec![ctx.shader_modules[0], ctx.shader_modules[2]],
-    ];
+    let shader_vertex = ctx
+        .new_shader(
+            "shader_vertex",
+            graphene::ShaderStage::Vertex,
+            "default.vert",
+        )
+        .unwrap();
+    let shader_default = ctx
+        .new_shader(
+            "shader_default",
+            graphene::ShaderStage::Fragment,
+            "default.frag",
+        )
+        .unwrap();
+    let shader_blur = ctx
+        .new_shader(
+            "shader_blur",
+            graphene::ShaderStage::Fragment,
+            "gaussian_blur.frag",
+        )
+        .unwrap();
 
     loop {
         if !ctx.begin_frame() {
@@ -146,9 +162,10 @@ fn main() {
             .add_pass(
                 &mut graph_builder,
                 "forward lit",
+                shader_vertex,
+                shader_default,
                 &vec![temp_texture],
                 Some(depth_texture),
-                &shader_modules[0],
                 uniform_buffer,
                 environment_texture,
                 &environment_sampler,
@@ -158,9 +175,10 @@ fn main() {
             .add_pass(
                 &mut graph_builder,
                 "forward lit 2",
+                shader_vertex,
+                shader_blur,
                 &vec![ctx.facade.swapchain_textures[ctx.swapchain_idx]],
                 Some(depth_texture),
-                &shader_modules[1],
                 uniform_buffer,
                 environment_texture,
                 &environment_sampler,
