@@ -89,11 +89,22 @@ fn main() {
     let mut ctx = graphene::Context::new();
     let start_instant = std::time::Instant::now();
 
-    let mesh = graphene::Mesh::load("assets/meshes/suzanne.glb", &ctx.gpu, ctx.command_pool);
-    let mesh2 = graphene::Mesh::load("assets/meshes/sphere.glb", &ctx.gpu, ctx.command_pool);
+    // TODO: Having to pass in debug_utils here is a little messy. Streamline.
+    let mesh = graphene::Mesh::load(
+        "assets/meshes/suzanne.glb",
+        &ctx.gpu,
+        ctx.command_pool,
+        &ctx.debug_utils,
+    );
+    let mesh2 = graphene::Mesh::load(
+        "assets/meshes/sphere.glb",
+        &ctx.gpu,
+        ctx.command_pool,
+        &ctx.debug_utils,
+    );
     let depth_texture = ctx
         .new_texture_relative_size(
-            "depth",
+            "image_depth",
             1.0,
             vk::Format::D32_SFLOAT,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -102,7 +113,7 @@ fn main() {
         .unwrap();
     let temp_texture = ctx
         .new_texture_relative_size(
-            "temp",
+            "image_temp",
             1.0,
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::COLOR_ATTACHMENT,
@@ -112,7 +123,7 @@ fn main() {
     let environment_sampler = graphene::Sampler::new(&ctx.gpu);
     let environment_texture = ctx
         .new_texture_from_file(
-            "environment map",
+            "image_environment_map",
             "assets/textures/env_carpentry_shop_02_2k.jpg",
         )
         .unwrap();
@@ -153,7 +164,7 @@ fn main() {
             .new_buffer(
                 // TODO: Avoid having the swapchain index, automatically
                 // creating a unique uniform buffer per pass and per graph
-                &format!("uniform buffer_{}", ctx.swapchain_idx),
+                &format!("buffer_uniform_{}", ctx.swapchain_idx),
                 std::mem::size_of::<UniformBuffer>(),
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
             )

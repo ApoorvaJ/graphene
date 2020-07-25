@@ -58,11 +58,11 @@ impl DebugUtils {
         }
     }
 
-    pub fn set_image_name(&self, vk_image: vk::Image, name: &str) {
+    fn set_object_name(&self, vk_raw_handle: u64, object_type: vk::ObjectType, name: &str) {
         let c_name = CString::new(name).unwrap();
         let info = ash::vk::DebugUtilsObjectNameInfoEXT::builder()
-            .object_type(vk::ObjectType::IMAGE)
-            .object_handle(vk_image.as_raw())
+            .object_type(object_type)
+            .object_handle(vk_raw_handle)
             .object_name(&c_name)
             .build();
         unsafe {
@@ -70,6 +70,14 @@ impl DebugUtils {
                 .debug_utils_set_object_name(self.device.handle(), &info)
                 .unwrap();
         }
+    }
+
+    pub fn set_image_name(&self, vk_image: vk::Image, name: &str) {
+        self.set_object_name(vk_image.as_raw(), vk::ObjectType::IMAGE, name);
+    }
+
+    pub fn set_buffer_name(&self, vk_buffer: vk::Buffer, name: &str) {
+        self.set_object_name(vk_buffer.as_raw(), vk::ObjectType::BUFFER, name);
     }
 }
 

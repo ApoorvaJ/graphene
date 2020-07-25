@@ -43,13 +43,13 @@ impl Context {
         let w = (self.facade.swapchain_width as f32 * scale) as u32;
         let h = (self.facade.swapchain_height as f32 * scale) as u32;
         let tex = Texture::new(
-            &self.gpu,
+            name,
             w,
             h,
             format,
             usage,
             aspect_flags,
-            name,
+            &self.gpu,
             &self.debug_utils,
         );
         self.texture_list.push(InternalTexture {

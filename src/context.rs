@@ -80,13 +80,13 @@ impl Context {
                 let w = (self.facade.swapchain_width as f32 * scale) as u32;
                 let h = (self.facade.swapchain_height as f32 * scale) as u32;
                 tex.texture = Texture::new(
-                    &self.gpu,
+                    &tex.texture.name,
                     w,
                     h,
                     tex.texture.format,
                     tex.texture.usage,
                     tex.texture.aspect_flags,
-                    &tex.texture.name,
+                    &self.gpu,
                     &self.debug_utils,
                 );
             }
@@ -504,7 +504,8 @@ impl Context {
         size: usize,
         usage: vk::BufferUsageFlags,
     ) -> Result<BufferHandle, String> {
-        self.buffer_list.new_buffer(name, size, usage, &self.gpu)
+        self.buffer_list
+            .new_buffer(name, size, usage, &self.gpu, &self.debug_utils)
     }
 
     pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {

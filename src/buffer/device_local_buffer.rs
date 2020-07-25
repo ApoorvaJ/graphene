@@ -22,6 +22,7 @@ impl DeviceLocalBuffer {
         usage: vk::BufferUsageFlags,
         gpu: &Gpu,
         command_pool: vk::CommandPool,
+        debug_utils: &DebugUtils,
     ) -> DeviceLocalBuffer {
         let size = std::mem::size_of_val(data);
 
@@ -31,6 +32,7 @@ impl DeviceLocalBuffer {
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             &gpu,
+            debug_utils,
         );
 
         // ## Copy data to staging buffer

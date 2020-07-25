@@ -27,14 +27,14 @@ impl Drop for Texture {
 
 impl Texture {
     pub fn new(
-        gpu: &Gpu,
+        name: &str,
         width: u32,
         height: u32,
         format: vk::Format,
         usage: vk::ImageUsageFlags,
         aspect_flags: vk::ImageAspectFlags,
-        name: &str,
-        debug_marker: &DebugUtils,
+        gpu: &Gpu,
+        debug_utils: &DebugUtils,
     ) -> Texture {
         let device = gpu.device.clone();
 
@@ -108,7 +108,7 @@ impl Texture {
             }
         };
 
-        debug_marker.set_image_name(image, name);
+        debug_utils.set_image_name(image, name);
 
         Texture {
             width,
@@ -213,13 +213,13 @@ impl Texture {
         }
 
         let texture = Texture::new(
-            gpu,
+            name,
             image_width,
             image_height,
             vk::Format::R8G8B8A8_UNORM, // TODO: Derive format from file or take as an argument
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             vk::ImageAspectFlags::COLOR,
-            name,
+            gpu,
             debug_utils,
         );
 
@@ -228,6 +228,7 @@ impl Texture {
             image_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             gpu,
+            debug_utils,
         );
         staging_buffer.upload_data(&image_data, 0);
 

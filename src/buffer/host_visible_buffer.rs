@@ -23,6 +23,7 @@ impl HostVisibleBuffer {
         size: usize,
         usage: vk::BufferUsageFlags,
         gpu: &Gpu,
+        debug_utils: &DebugUtils,
     ) -> HostVisibleBuffer {
         let (vk_buffer, memory) = super::new_raw_buffer(
             size,
@@ -30,6 +31,8 @@ impl HostVisibleBuffer {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             gpu,
         );
+
+        debug_utils.set_buffer_name(vk_buffer, name);
 
         HostVisibleBuffer {
             name: String::from(name),

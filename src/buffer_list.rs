@@ -19,6 +19,7 @@ impl BufferList {
         size: usize,
         usage: vk::BufferUsageFlags,
         gpu: &Gpu,
+        debug_utils: &DebugUtils,
     ) -> Result<BufferHandle, String> {
         // Hash
         let handle = {
@@ -36,7 +37,7 @@ impl BufferList {
             // ));
         }
         // Create and insert new buffer
-        let buffer = HostVisibleBuffer::new(name, size, usage, gpu);
+        let buffer = HostVisibleBuffer::new(name, size, usage, gpu, debug_utils);
         self.list.push((handle, buffer));
 
         Ok(handle)

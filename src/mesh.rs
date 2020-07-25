@@ -1,12 +1,19 @@
 use crate::*;
 
+// TODO: This module is not a core part of the render graph. Make that clear from the hierarchy.
+
 pub struct Mesh {
     pub vertex_buffer: DeviceLocalBuffer,
     pub index_buffer: DeviceLocalBuffer,
 }
 
 impl Mesh {
-    pub fn load(path: &str, gpu: &Gpu, command_pool: vk::CommandPool) -> Mesh {
+    pub fn load(
+        path: &str,
+        gpu: &Gpu,
+        command_pool: vk::CommandPool,
+        debug_utils: &DebugUtils,
+    ) -> Mesh {
         // TODO: Benchmark and optimize
         let (vertices_data, indices_data) = {
             let mut vertices_data: Vec<f32> = Vec::new();
@@ -55,6 +62,7 @@ impl Mesh {
             vk::BufferUsageFlags::VERTEX_BUFFER,
             gpu,
             command_pool,
+            debug_utils,
         );
 
         // # Create and upload index buffer
@@ -63,6 +71,7 @@ impl Mesh {
             vk::BufferUsageFlags::INDEX_BUFFER,
             gpu,
             command_pool,
+            debug_utils,
         );
 
         Mesh {
