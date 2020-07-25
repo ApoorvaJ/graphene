@@ -117,6 +117,12 @@ fn main() {
         )
         .unwrap();
 
+    // TODO: Remove this and implement a shader API
+    let shader_modules = vec![
+        vec![ctx.shader_modules[0], ctx.shader_modules[1]],
+        vec![ctx.shader_modules[0], ctx.shader_modules[2]],
+    ];
+
     loop {
         if !ctx.begin_frame() {
             break;
@@ -142,7 +148,7 @@ fn main() {
                 "forward lit",
                 &vec![temp_texture],
                 Some(depth_texture),
-                &ctx.shader_modules,
+                &shader_modules[0],
                 uniform_buffer,
                 environment_texture,
                 &environment_sampler,
@@ -154,7 +160,7 @@ fn main() {
                 "forward lit 2",
                 &vec![ctx.facade.swapchain_textures[ctx.swapchain_idx]],
                 Some(depth_texture),
-                &ctx.shader_modules,
+                &shader_modules[1],
                 uniform_buffer,
                 environment_texture,
                 &environment_sampler,

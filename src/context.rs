@@ -434,7 +434,7 @@ impl Context {
         name: &str,
         output_texs: &Vec<TextureHandle>,
         opt_depth_tex: Option<TextureHandle>,
-        shader_modules: &Vec<vk::ShaderModule>,
+        shader_modules: &[vk::ShaderModule],
         uniform_buffer: BufferHandle,
         texture_handle: TextureHandle,
         environment_sampler: &Sampler,

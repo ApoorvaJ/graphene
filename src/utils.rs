@@ -43,7 +43,7 @@ fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule
 pub fn get_shader_modules(gpu: &Gpu) -> Option<(Vec<vk::ShaderModule>, usize)> {
     use std::path::Path;
 
-    let glsl_files = ["default.vert", "default.frag"];
+    let glsl_files = ["default.vert", "default.frag", "gaussian_blur.frag"];
 
     // Ensure that shader cache directory exists
     std::fs::create_dir_all("_shadercache").expect("Couldn't create shader cache directory");
