@@ -27,6 +27,7 @@ impl Facade {
         gpu: &Gpu,
         window: &winit::window::Window,
         texture_list: &mut Vec<InternalTexture>,
+        debug_utils: &DebugUtils,
     ) -> Facade {
         let device = gpu.device.clone();
         let ext_swapchain = ash::extensions::khr::Swapchain::new(&basis.instance, &device);
@@ -166,12 +167,13 @@ impl Facade {
         // Add swapchain textures to the context's texture list
         let swapchain_textures = (0..num_frames)
             .map(|i| {
-                let name = String::from(&format!("swapchain_{}", i));
+                let name = String::from(&format!("image_swapchain_{}", i));
                 let hash: u64 = {
                     let mut hasher = DefaultHasher::new();
                     name.hash(&mut hasher);
                     hasher.finish()
                 };
+                debug_utils.set_image_name(swapchain_images[i as usize], &name);
                 let handle = TextureHandle(hash);
                 let texture = Texture {
                     width: swapchain_extent.width,

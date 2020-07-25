@@ -72,7 +72,13 @@ impl Context {
         };
         // Recreate swapchain
         self.facade.destroy(&mut self.texture_list);
-        self.facade = Facade::new(&self.basis, &self.gpu, &self.window, &mut self.texture_list);
+        self.facade = Facade::new(
+            &self.basis,
+            &self.gpu,
+            &self.window,
+            &mut self.texture_list,
+            &self.debug_utils,
+        );
         // Recreate the textures which depend on the resolution of the swapchain
         for i in 0..self.texture_list.len() {
             let tex = &mut self.texture_list[i];
@@ -128,7 +134,7 @@ impl Context {
 
         // TODO: Move this up?
         let mut texture_list = Vec::new();
-        let facade = Facade::new(&basis, &gpu, &window, &mut texture_list);
+        let facade = Facade::new(&basis, &gpu, &window, &mut texture_list, &debug_utils);
         let buffer_list = BufferList::new();
 
         // # Allocate command buffers
