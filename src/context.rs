@@ -326,6 +326,10 @@ impl Context {
                 .begin_command_buffer(cmd_buf, &command_buffer_begin_info)
                 .expect("Failed to begin recording command buffer.");
         }
+        /* Naming the command buffer doesn't seem to work on creating it, so we
+        name it on every begin frame instead.*/
+        self.debug_utils
+            .set_command_buffer_name(cmd_buf, &format!("command_buffer_{}", self.swapchain_idx));
 
         is_running
     }

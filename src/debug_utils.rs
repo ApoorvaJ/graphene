@@ -79,6 +79,10 @@ impl DebugUtils {
     pub fn set_buffer_name(&self, vk_buffer: vk::Buffer, name: &str) {
         self.set_object_name(vk_buffer.as_raw(), vk::ObjectType::BUFFER, name);
     }
+
+    pub fn set_command_buffer_name(&self, vk_cmd_buf: vk::CommandBuffer, name: &str) {
+        self.set_object_name(vk_cmd_buf.as_raw(), vk::ObjectType::COMMAND_BUFFER, name);
+    }
 }
 
 // Debug callbacks
