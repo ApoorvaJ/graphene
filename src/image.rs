@@ -124,16 +124,12 @@ impl Image {
         }
     }
 
-    fn transition_image_layout(
+    pub fn transition_image_layout(
         &self,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
-        command_pool: vk::CommandPool,
-        gpu: &Gpu,
+        command_buffer: vk::CommandBuffer,
     ) {
-        // TODO: Hoist this out
-        let command_buffer = begin_single_use_command_buffer(&gpu.device, command_pool);
-
         let src_access_mask;
         let dst_access_mask;
         let source_stage;
@@ -147,6 +143,13 @@ impl Image {
             source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
             destination_stage = vk::PipelineStageFlags::TRANSFER;
         } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        {
+            src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            dst_access_mask = vk::AccessFlags::SHADER_READ;
+            source_stage = vk::PipelineStageFlags::TRANSFER;
+            destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
+        } else if old_layout == vk::ImageLayout::UNDEFINED
             && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
         {
             src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
@@ -177,7 +180,7 @@ impl Image {
         }];
 
         unsafe {
-            gpu.device.cmd_pipeline_barrier(
+            self.device.cmd_pipeline_barrier(
                 command_buffer,
                 source_stage,
                 destination_stage,
@@ -187,9 +190,6 @@ impl Image {
                 &image_barriers,
             );
         }
-
-        // TODO: Hoist this out
-        end_single_use_command_buffer(command_buffer, command_pool, gpu);
     }
 
     pub fn new_from_image(
@@ -232,17 +232,16 @@ impl Image {
         );
         staging_buffer.upload_data(&image_data, 0);
 
+        let command_buffer = begin_single_use_command_buffer(&gpu.device, command_pool);
+
         image.transition_image_layout(
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            command_pool,
-            gpu,
+            command_buffer,
         );
 
         // Copy buffer to image
         {
-            let command_buffer = begin_single_use_command_buffer(&gpu.device, command_pool);
-
             let buffer_image_regions = [vk::BufferImageCopy {
                 image_subresource: vk::ImageSubresourceLayers {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -270,16 +269,15 @@ impl Image {
                     &buffer_image_regions,
                 );
             }
-
-            end_single_use_command_buffer(command_buffer, command_pool, &gpu);
         }
 
         image.transition_image_layout(
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            command_pool,
-            gpu,
+            command_buffer,
         );
+
+        end_single_use_command_buffer(command_buffer, command_pool, gpu);
 
         image
     }

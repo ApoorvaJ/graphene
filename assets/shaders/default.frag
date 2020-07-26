@@ -19,7 +19,8 @@ vec3 f_schlick(vec3 f0, float f90, float u) {
 
 void main() {
     vec3 n = normalize(frag_norm_world);
-    out_color = vec4(n.xyz, 1.0);
+    vec3 lit = vec3(1, 1, 1) * dot(vec3(0, -1, 0), n.xyz);
+    out_color = vec4(lit, 1.0);
     return;
 
     // float roughness = cos(ubo.elapsed_seconds) * 0.5 + 0.5;

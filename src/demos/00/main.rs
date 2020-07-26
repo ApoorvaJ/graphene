@@ -23,8 +23,8 @@ fn execute_pass(
 ) {
     // Update uniform buffer
     {
-        let cam_pos = Vec3::new(0.0, -6.0, 0.0);
-        let cam_rot = Quat::from_rotation_z((elapsed_seconds * 1.5).sin() * 0.125 * PI);
+        let cam_pos = Vec3::new(0.0, -4.5, 0.0);
+        let cam_rot = Quat::from_rotation_z((elapsed_seconds * 1.5).sin() * 0.1 * PI);
         let obj_pos = Vec3::new(0.0, 0.0, 0.0);
         let obj_rot = Quat::from_rotation_z(elapsed_seconds * 0.3);
         let obj_scale = Vec3::new(1.0, 1.0, 1.0);
@@ -148,11 +148,11 @@ fn main() {
             "default.frag",
         )
         .unwrap();
-    let shader_blur = ctx
+    let shader_aberration = ctx
         .new_shader(
-            "shader_blur",
+            "shader_aberration",
             graphene::ShaderStage::Fragment,
-            "gaussian_blur.frag",
+            "chromatic_aberration.frag",
         )
         .unwrap();
 
@@ -193,11 +193,11 @@ fn main() {
                 &mut graph_builder,
                 "forward lit 2",
                 shader_fullscreen_triangle_vertex,
-                shader_blur,
+                shader_aberration,
                 &vec![ctx.facade.swapchain_images[ctx.swapchain_idx]],
                 Some(depth_image),
                 uniform_buffer,
-                environment_image,
+                temp_image,
                 &environment_sampler,
             )
             .unwrap();
@@ -207,6 +207,15 @@ fn main() {
         ctx.begin_pass(graph, pass_0);
         execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh);
         ctx.end_pass(graph);
+        // Layout transition (TODO: Do this automatically in the render graph)
+        {
+            let img = ctx.image_list.get_image_from_handle(temp_image).unwrap();
+            img.image.transition_image_layout(
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                cmd_buf,
+            );
+        }
         // Pass 1
         ctx.begin_pass(graph, pass_1);
         unsafe {
