@@ -10,6 +10,8 @@ struct UniformBuffer {
     mtx_obj_to_clip: Mat4,
     mtx_norm_obj_to_world: Mat4,
     elapsed_seconds: f32,
+    viewport_w: f32,
+    viewport_h: f32,
 }
 
 fn execute_pass(
@@ -59,6 +61,8 @@ fn execute_pass(
             mtx_obj_to_clip: mtx_view_to_clip * mtx_world_to_view * mtx_obj_to_world,
             mtx_norm_obj_to_world,
             elapsed_seconds,
+            viewport_w: ctx.facade.swapchain_width as f32,
+            viewport_h: ctx.facade.swapchain_height as f32,
         }];
 
         ctx.upload_data(uniform_buffer, &ubos);
@@ -97,13 +101,6 @@ fn main() {
         ctx.command_pool,
         &ctx.debug_utils,
     );
-    let mesh2 = graphene::Mesh::load(
-        "sphere",
-        "assets/meshes/sphere.glb",
-        &ctx.gpu,
-        ctx.command_pool,
-        &ctx.debug_utils,
-    );
     let depth_image = ctx
         .new_image_relative_size(
             "image_depth",
@@ -135,6 +132,13 @@ fn main() {
             "shader_vertex",
             graphene::ShaderStage::Vertex,
             "default.vert",
+        )
+        .unwrap();
+    let shader_fullscreen_triangle_vertex = ctx
+        .new_shader(
+            "fullscreen_triangle_vertex",
+            graphene::ShaderStage::Vertex,
+            "fullscreen_triangle.vert",
         )
         .unwrap();
     let shader_default = ctx
@@ -188,7 +192,7 @@ fn main() {
             .add_pass(
                 &mut graph_builder,
                 "forward lit 2",
-                shader_vertex,
+                shader_fullscreen_triangle_vertex,
                 shader_blur,
                 &vec![ctx.facade.swapchain_images[ctx.swapchain_idx]],
                 Some(depth_image),
@@ -205,7 +209,9 @@ fn main() {
         ctx.end_pass(graph);
         // Pass 1
         ctx.begin_pass(graph, pass_1);
-        execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh2);
+        unsafe {
+            ctx.gpu.device.cmd_draw(cmd_buf, 3, 1, 0, 0);
+        }
         ctx.end_pass(graph);
 
         ctx.end_frame();
