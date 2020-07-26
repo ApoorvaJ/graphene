@@ -12,8 +12,8 @@ pub struct BufferHandle(pub u64);
 pub struct GraphHandle(pub u64);
 #[derive(Copy, Clone, Debug, Hash, PartialEq)]
 pub struct PassHandle(pub u64);
-#[derive(Copy, Clone)]
-pub struct TextureHandle(pub u64);
+#[derive(Copy, Clone, Debug, Hash, PartialEq)]
+pub struct ImageHandle(pub u64);
 #[derive(Copy, Clone, Debug, Hash, PartialEq)]
 pub struct ShaderHandle(pub u64);
 
@@ -23,7 +23,7 @@ pub struct Context {
 
     pub shader_list: ShaderList,
     // TODO: Move these to the graph builder instead?
-    pub texture_list: Vec<InternalTexture>,
+    pub image_list: ImageList,
     pub buffer_list: BufferList,
 
     graph_cache: Vec<(Graph, GraphHandle)>, // (graph, hash) // TODO: Make this a proper LRU and move it to its own file
@@ -57,7 +57,7 @@ impl Drop for Context {
                 .device
                 .destroy_command_pool(self.command_pool, None);
 
-            self.facade.destroy(&mut self.texture_list);
+            self.facade.destroy(&mut self.image_list);
         }
     }
 }
@@ -71,27 +71,27 @@ impl Context {
                 .expect("Failed to wait device idle.")
         };
         // Recreate swapchain
-        self.facade.destroy(&mut self.texture_list);
+        self.facade.destroy(&mut self.image_list);
         self.facade = Facade::new(
             &self.basis,
             &self.gpu,
             &self.window,
-            &mut self.texture_list,
+            &mut self.image_list,
             &self.debug_utils,
         );
-        // Recreate the textures which depend on the resolution of the swapchain
-        for i in 0..self.texture_list.len() {
-            let tex = &mut self.texture_list[i];
-            if let TextureKind::RelativeSized { scale } = tex.kind {
+        // Recreate the images which depend on the resolution of the swapchain
+        for i in 0..self.image_list.list.len() {
+            let (_, internal_image) = &mut self.image_list.list[i];
+            if let ImageKind::RelativeSized { scale } = internal_image.kind {
                 let w = (self.facade.swapchain_width as f32 * scale) as u32;
                 let h = (self.facade.swapchain_height as f32 * scale) as u32;
-                tex.texture = Texture::new(
-                    &tex.texture.name,
+                internal_image.image = Image::new(
+                    &internal_image.image.name,
                     w,
                     h,
-                    tex.texture.format,
-                    tex.texture.usage,
-                    tex.texture.aspect_flags,
+                    internal_image.image.format,
+                    internal_image.image.usage,
+                    internal_image.image.aspect_flags,
                     &self.gpu,
                     &self.debug_utils,
                 );
@@ -133,8 +133,8 @@ impl Context {
         let shader_list = ShaderList::new(gpu.device.clone());
 
         // TODO: Move this up?
-        let mut texture_list = Vec::new();
-        let facade = Facade::new(&basis, &gpu, &window, &mut texture_list, &debug_utils);
+        let mut image_list = ImageList::new();
+        let facade = Facade::new(&basis, &gpu, &window, &mut image_list, &debug_utils);
         let buffer_list = BufferList::new();
 
         // # Allocate command buffers
@@ -168,7 +168,7 @@ impl Context {
             event_loop: event_loop,
 
             shader_list,
-            texture_list,
+            image_list,
             buffer_list,
 
             graph_cache: Vec::new(),
@@ -210,6 +210,7 @@ impl Context {
                     &self.gpu,
                     &self.shader_list,
                     &self.buffer_list,
+                    &self.image_list,
                 ),
                 GraphHandle(req_hash),
             ));
@@ -438,49 +439,28 @@ impl Context {
         name: &str,
         vertex_shader: ShaderHandle,
         fragment_shader: ShaderHandle,
-        output_texs: &Vec<TextureHandle>,
-        opt_depth_tex: Option<TextureHandle>,
+        output_images: &Vec<ImageHandle>,
+        opt_depth_image: Option<ImageHandle>,
         uniform_buffer: BufferHandle,
-        texture_handle: TextureHandle,
+        image_handle: ImageHandle,
         environment_sampler: &Sampler,
     ) -> Result<PassHandle, String> {
-        // TODO: Assert that color and depth textures have the same resolution
-        let outputs = output_texs
-            .iter()
-            .map(|handle| {
-                let tex = self.get_texture_from_hash(handle.0).expect(&format!(
-                    "Output texture with handle `{}` not found in context.",
-                    handle.0
-                ));
-                (tex.texture.image_view, tex.texture.format)
-            })
-            .collect();
-
-        let tex = self
-            .get_texture_from_hash(texture_handle.0)
+        // TODO: Assert that color and depth images have the same resolution
+        let img = self
+            .image_list
+            .get_image_from_handle(image_handle)
             .expect(&format!(
-                "Texture with handle `{}` not found in the context.",
-                texture_handle.0
+                "Image with handle `{:?}` not found in the context.",
+                image_handle
             ));
-        let opt_depth = if let Some(depth_tex_handle) = opt_depth_tex {
-            let depth_tex = self
-                .get_texture_from_hash(depth_tex_handle.0)
-                .expect(&format!(
-                    "Depth texture with handle `{}` not found in the context.",
-                    depth_tex_handle.0
-                ));
-            Some((depth_tex.texture.image_view, depth_tex.texture.format))
-        } else {
-            None
-        };
 
         let pass = Pass {
             name: String::from(name),
             vertex_shader,
             fragment_shader,
-            outputs,
-            input_texture: (tex.texture.image_view, environment_sampler.vk_sampler),
-            opt_depth,
+            output_images: output_images.clone(),
+            input_image: (img.image.image_view, environment_sampler.vk_sampler),
+            opt_depth_image,
             viewport_width: self.facade.swapchain_width,
             viewport_height: self.facade.swapchain_height,
             uniform_buffer,
@@ -520,5 +500,35 @@ impl Context {
 
     pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {
         self.buffer_list.upload_data(buffer_handle, data);
+    }
+
+    /* Images */
+    pub fn new_image_relative_size(
+        &mut self,
+        name: &str,
+        scale: f32,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        aspect_flags: vk::ImageAspectFlags,
+    ) -> Result<ImageHandle, String> {
+        self.image_list.new_image_relative_size(
+            name,
+            scale,
+            format,
+            usage,
+            aspect_flags,
+            &self.facade,
+            &self.gpu,
+            &self.debug_utils,
+        )
+    }
+    pub fn new_image_from_file(&mut self, name: &str, path: &str) -> Result<ImageHandle, String> {
+        self.image_list.new_image_from_file(
+            name,
+            path,
+            &self.gpu,
+            self.command_pool,
+            &self.debug_utils,
+        )
     }
 }

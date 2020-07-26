@@ -49,6 +49,7 @@ impl Graph {
         gpu: &Gpu,
         shader_list: &ShaderList,
         buffer_list: &BufferList,
+        image_list: &ImageList,
     ) -> Graph {
         // Create descriptor pool
         let descriptor_pool = {
@@ -82,6 +83,31 @@ impl Graph {
             shader_handles.push(pass.vertex_shader);
             shader_handles.push(pass.fragment_shader);
 
+            // Find depth image
+            let mut opt_depth_image = None;
+            if let Some(depth_handle) = pass.opt_depth_image {
+                opt_depth_image = Some(image_list.get_image_from_handle(depth_handle).expect(
+                    &format!(
+                        "Image with handle `{:?}` not found in the context.",
+                        depth_handle
+                    ),
+                ));
+            }
+
+            // Find output images
+            let output_images: Vec<&InternalImage> = pass
+                .output_images
+                .iter()
+                .map(|output_handle| {
+                    image_list
+                        .get_image_from_handle(*output_handle)
+                        .expect(&format!(
+                            "Image with handle `{:?}` not found in the context.",
+                            output_handle
+                        ))
+                })
+                .collect();
+
             /* Create render pass */
             let render_pass = {
                 let mut attachments: Vec<vk::AttachmentDescription> = Vec::new();
@@ -94,9 +120,9 @@ impl Graph {
                     attachment: 0,
                     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 };
-                if let Some((_depth_image_view, depth_format)) = pass.opt_depth {
+                if let Some(depth_image) = opt_depth_image {
                     attachments.push(vk::AttachmentDescription {
-                        format: depth_format,
+                        format: depth_image.image.format,
                         flags: vk::AttachmentDescriptionFlags::empty(),
                         samples: vk::SampleCountFlags::TYPE_1,
                         load_op: vk::AttachmentLoadOp::CLEAR,
@@ -112,9 +138,9 @@ impl Graph {
                 }
 
                 // Color attachment descriptions and references
-                for (_image_view, format) in &pass.outputs {
+                for output_image in &output_images {
                     attachments.push(vk::AttachmentDescription {
-                        format: *format,
+                        format: output_image.image.format,
                         flags: vk::AttachmentDescriptionFlags::empty(),
                         samples: vk::SampleCountFlags::TYPE_1,
                         load_op: vk::AttachmentLoadOp::CLEAR,
@@ -153,11 +179,11 @@ impl Graph {
             /* Create framebuffer */
             let framebuffer: vk::Framebuffer = {
                 let mut attachments: Vec<vk::ImageView> = Vec::new();
-                if let Some((depth_image_view, _depth_format)) = pass.opt_depth {
-                    attachments.push(depth_image_view);
+                if let Some(depth_image) = opt_depth_image {
+                    attachments.push(depth_image.image.image_view);
                 }
-                for (image_view, _format) in &pass.outputs {
-                    attachments.push(*image_view);
+                for output_image in &output_images {
+                    attachments.push(output_image.image.image_view);
                 }
 
                 let framebuffer_create_info = vk::FramebufferCreateInfo::builder()
@@ -176,7 +202,7 @@ impl Graph {
 
             /* Set clear values */
             let mut clear_values = Vec::new();
-            if pass.opt_depth.is_some() {
+            if opt_depth_image.is_some() {
                 // Clear value for depth buffer
                 clear_values.push(vk::ClearValue {
                     depth_stencil: vk::ClearDepthStencilValue {
@@ -185,7 +211,7 @@ impl Graph {
                     },
                 });
             }
-            for _ in &pass.outputs {
+            for _ in &output_images {
                 // Clear values for color buffer
                 clear_values.push(vk::ClearValue {
                     color: vk::ClearColorValue {
@@ -247,7 +273,7 @@ impl Graph {
                     range: uniform_buffer.size as u64,
                 }];
 
-                let (input_image_view, input_sampler) = pass.input_texture;
+                let (input_image_view, input_sampler) = pass.input_image;
                 let descriptor_image_info = [vk::DescriptorImageInfo {
                     sampler: input_sampler,
                     image_view: input_image_view,

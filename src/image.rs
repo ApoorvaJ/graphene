@@ -1,31 +1,31 @@
 use crate::*;
 
-pub struct Texture {
+pub struct Image {
     pub width: u32,
     pub height: u32,
     pub format: vk::Format,
     pub usage: vk::ImageUsageFlags,
     pub aspect_flags: vk::ImageAspectFlags,
-    pub image: vk::Image,
+    pub vk_image: vk::Image,
     pub image_view: vk::ImageView,
     pub opt_device_memory: Option<vk::DeviceMemory>, // None if we didn't manually allocate memory, e.g. in the case of swapchain images
     pub name: String,
     pub device: ash::Device,
 }
 
-impl Drop for Texture {
+impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_image_view(self.image_view, None);
             if let Some(mem) = self.opt_device_memory {
-                self.device.destroy_image(self.image, None); // Only destroy the image if we allocated it in the first place
+                self.device.destroy_image(self.vk_image, None); // Only destroy the image if we allocated it in the first place
                 self.device.free_memory(mem, None);
             }
         }
     }
 }
 
-impl Texture {
+impl Image {
     pub fn new(
         name: &str,
         width: u32,
@@ -35,7 +35,7 @@ impl Texture {
         aspect_flags: vk::ImageAspectFlags,
         gpu: &Gpu,
         debug_utils: &DebugUtils,
-    ) -> Texture {
+    ) -> Image {
         let device = gpu.device.clone();
 
         let image_create_info = vk::ImageCreateInfo::builder()
@@ -53,13 +53,13 @@ impl Texture {
                 depth: 1,
             });
 
-        let image = unsafe {
+        let vk_image = unsafe {
             device
                 .create_image(&image_create_info, None)
-                .expect("Failed to create texture image.")
+                .expect("Failed to create image.")
         };
 
-        let image_memory_requirement = unsafe { device.get_image_memory_requirements(image) };
+        let image_memory_requirement = unsafe { device.get_image_memory_requirements(vk_image) };
         let memory_type_index = gpu
             .memory_properties
             .memory_types
@@ -79,12 +79,12 @@ impl Texture {
         let device_memory = unsafe {
             device
                 .allocate_memory(&memory_allocate_info, None)
-                .expect("Failed to allocate texture image memory.")
+                .expect("Failed to allocate image memory.")
         };
 
         unsafe {
             device
-                .bind_image_memory(image, device_memory, 0)
+                .bind_image_memory(vk_image, device_memory, 0)
                 .expect("Failed to bind image memory.");
         }
 
@@ -99,7 +99,7 @@ impl Texture {
                     base_array_layer: 0,
                     layer_count: 1,
                 })
-                .image(image);
+                .image(vk_image);
 
             unsafe {
                 gpu.device
@@ -108,15 +108,15 @@ impl Texture {
             }
         };
 
-        debug_utils.set_image_name(image, name);
+        debug_utils.set_image_name(vk_image, name);
 
-        Texture {
+        Image {
             width,
             height,
             format,
             usage,
             aspect_flags,
-            image,
+            vk_image,
             image_view,
             opt_device_memory: Some(device_memory),
             device,
@@ -166,7 +166,7 @@ impl Texture {
             new_layout,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            image: self.image,
+            image: self.vk_image,
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 base_mip_level: 0,
@@ -198,9 +198,9 @@ impl Texture {
         command_pool: vk::CommandPool,
         name: &str,
         debug_utils: &DebugUtils,
-    ) -> Texture {
-        use image::GenericImageView;
-        let mut image_object = image::open(path).unwrap();
+    ) -> Image {
+        use ::image::GenericImageView;
+        let mut image_object = ::image::open(path).unwrap();
         image_object = image_object.flipv();
 
         let (image_width, image_height) = (image_object.width(), image_object.height());
@@ -209,10 +209,10 @@ impl Texture {
         let image_data = image_object.to_rgba().into_raw();
 
         if image_size <= 0 {
-            panic!("Failed to load texture image!")
+            panic!("Failed to load image.")
         }
 
-        let texture = Texture::new(
+        let image = Image::new(
             name,
             image_width,
             image_height,
@@ -232,7 +232,7 @@ impl Texture {
         );
         staging_buffer.upload_data(&image_data, 0);
 
-        texture.transition_image_layout(
+        image.transition_image_layout(
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             command_pool,
@@ -265,7 +265,7 @@ impl Texture {
                 gpu.device.cmd_copy_buffer_to_image(
                     command_buffer,
                     staging_buffer.vk_buffer,
-                    texture.image,
+                    image.vk_image,
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     &buffer_image_regions,
                 );
@@ -274,13 +274,13 @@ impl Texture {
             end_single_use_command_buffer(command_buffer, command_pool, &gpu);
         }
 
-        texture.transition_image_layout(
+        image.transition_image_layout(
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             command_pool,
             gpu,
         );
 
-        texture
+        image
     }
 }

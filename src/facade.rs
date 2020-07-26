@@ -10,7 +10,7 @@ pub struct Facade {
     pub swapchain_width: u32,
     pub swapchain_height: u32,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_textures: Vec<TextureHandle>, // Color textures that are presented to the screen
+    pub swapchain_images: Vec<ImageHandle>, // Color images that are presented to the screen
     // Synchronization primitives. These aren't really resolution-dependent
     // and could technically be moved outside the struct. They are kept here
     // because they're closely related to the rest of the members.
@@ -26,7 +26,7 @@ impl Facade {
         basis: &Basis,
         gpu: &Gpu,
         window: &winit::window::Window,
-        texture_list: &mut Vec<InternalTexture>,
+        image_list: &mut ImageList,
         debug_utils: &DebugUtils,
     ) -> Facade {
         let device = gpu.device.clone();
@@ -164,8 +164,8 @@ impl Facade {
             imageviews
         };
 
-        // Add swapchain textures to the context's texture list
-        let swapchain_textures = (0..num_frames)
+        // Add swapchain images to the context's image list
+        let swapchain_images = (0..num_frames)
             .map(|i| {
                 let name = String::from(&format!("image_swapchain_{}", i));
                 let hash: u64 = {
@@ -174,24 +174,26 @@ impl Facade {
                     hasher.finish()
                 };
                 debug_utils.set_image_name(swapchain_images[i as usize], &name);
-                let handle = TextureHandle(hash);
-                let texture = Texture {
+                let handle = ImageHandle(hash);
+                let image = Image {
                     width: swapchain_extent.width,
                     height: swapchain_extent.height,
                     format: swapchain_format,
                     usage: vk::ImageUsageFlags::empty(),
                     aspect_flags: vk::ImageAspectFlags::empty(),
-                    image: swapchain_images[i as usize],
+                    vk_image: swapchain_images[i as usize],
                     image_view: swapchain_imageviews[i as usize],
                     opt_device_memory: None, // This memory is not allocated by us. It is part of the swapchain.
                     device: device.clone(),
                     name,
                 };
-                texture_list.push(InternalTexture {
+                image_list.list.push((
                     handle,
-                    texture,
-                    kind: TextureKind::Swapchain,
-                });
+                    InternalImage {
+                        image,
+                        kind: ImageKind::Swapchain,
+                    },
+                ));
 
                 handle
             })
@@ -244,7 +246,7 @@ impl Facade {
             swapchain_width: swapchain_extent.width,
             swapchain_height: swapchain_extent.height,
             swapchain,
-            swapchain_textures,
+            swapchain_images,
             image_available_semaphores,
             render_finished_semaphores,
             command_buffer_complete_fences,
@@ -252,7 +254,7 @@ impl Facade {
         }
     }
 
-    pub fn destroy(&self, texture_list: &mut Vec<InternalTexture>) {
+    pub fn destroy(&self, image_list: &mut ImageList) {
         unsafe {
             for i in 0..self.num_frames {
                 self.device
@@ -265,7 +267,9 @@ impl Facade {
 
             self.ext_swapchain.destroy_swapchain(self.swapchain, None);
         }
-        // Delete swapchain textures from texture list
-        texture_list.retain(|t| t.kind != TextureKind::Swapchain);
+        // Delete swapchain images from image list
+        image_list
+            .list
+            .retain(|(_, internal_image)| internal_image.kind != ImageKind::Swapchain);
     }
 }

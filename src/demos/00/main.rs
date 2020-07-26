@@ -104,8 +104,8 @@ fn main() {
         ctx.command_pool,
         &ctx.debug_utils,
     );
-    let depth_texture = ctx
-        .new_texture_relative_size(
+    let depth_image = ctx
+        .new_image_relative_size(
             "image_depth",
             1.0,
             vk::Format::D32_SFLOAT,
@@ -113,8 +113,8 @@ fn main() {
             vk::ImageAspectFlags::DEPTH,
         )
         .unwrap();
-    let temp_texture = ctx
-        .new_texture_relative_size(
+    let temp_image = ctx
+        .new_image_relative_size(
             "image_temp",
             1.0,
             vk::Format::R8G8B8A8_SRGB,
@@ -123,8 +123,8 @@ fn main() {
         )
         .unwrap();
     let environment_sampler = graphene::Sampler::new(&ctx.gpu);
-    let environment_texture = ctx
-        .new_texture_from_file(
+    let environment_image = ctx
+        .new_image_from_file(
             "image_environment_map",
             "assets/textures/env_carpentry_shop_02_2k.jpg",
         )
@@ -177,10 +177,10 @@ fn main() {
                 "forward lit",
                 shader_vertex,
                 shader_default,
-                &vec![temp_texture],
-                Some(depth_texture),
+                &vec![temp_image],
+                Some(depth_image),
                 uniform_buffer,
-                environment_texture,
+                environment_image,
                 &environment_sampler,
             )
             .unwrap();
@@ -190,10 +190,10 @@ fn main() {
                 "forward lit 2",
                 shader_vertex,
                 shader_blur,
-                &vec![ctx.facade.swapchain_textures[ctx.swapchain_idx]],
-                Some(depth_texture),
+                &vec![ctx.facade.swapchain_images[ctx.swapchain_idx]],
+                Some(depth_image),
                 uniform_buffer,
-                environment_texture,
+                environment_image,
                 &environment_sampler,
             )
             .unwrap();
