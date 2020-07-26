@@ -16,12 +16,6 @@ layout(location = 0) out vec4 out_color;
 float noise1d(float n){
     return fract(cos(n*89.42)*343.42);
 }
-vec3 noise2d(vec2 co){
-  float r = fract(sin(dot(co.xy ,vec2(1.0,73))) * 43758.5453);
-  float g = noise1d(r);
-  float b = noise1d(g);
-  return vec3(r, g, b);
-}
 
 void main() {
     vec2 viewport_size = vec2(ubo.viewport_w, ubo.viewport_h);

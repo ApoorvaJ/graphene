@@ -58,8 +58,10 @@ impl ShaderList {
             ));
         }
         // Get shader module (compile if required)
+        const SHADER_CACHE_PATH: &str = "_cache/shaders";
+        std::fs::create_dir_all(SHADER_CACHE_PATH).expect("Could not create the _cache directory.");
         let source_path = String::from(&format!("assets/shaders/{}", path));
-        let spirv_path = String::from(&format!("_shadercache/{}.spv", path));
+        let spirv_path = String::from(&format!("{}/{}.spv", SHADER_CACHE_PATH, path));
         let is_compilation_needed = is_compilation_needed(&source_path, &spirv_path);
         let vk_shader_module = get_shader_module(
             &self.device,
