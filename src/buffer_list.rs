@@ -54,7 +54,7 @@ impl BufferList {
     }
 
     pub fn upload_data<T>(&self, buffer_handle: BufferHandle, data: &[T]) {
-        let internal_buffer = self.get_buffer_from_handle(buffer_handle).expect(&format!(
+        let internal_buffer = self.get_buffer_from_handle(buffer_handle).unwrap_or_else(||panic!(
             "A buffer with the hash `{}` not found in the context.",
             buffer_handle.0
         ));

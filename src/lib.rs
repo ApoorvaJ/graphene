@@ -1,3 +1,5 @@
+#![allow(clippy::new_without_default)]
+
 mod platforms;
 
 pub mod basis;

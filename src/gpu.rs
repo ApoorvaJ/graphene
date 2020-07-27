@@ -144,6 +144,7 @@ impl Gpu {
         };
 
         // # Create a logical device, queues, the command pool, sync primitives, and the final gpu struct
+        #[allow(clippy::let_and_return)]
         let gpu = {
             // Pick the most eligible of the candidate GPU.
             // Currently, we just pick the first one.

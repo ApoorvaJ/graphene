@@ -86,12 +86,16 @@ impl Graph {
             // Find depth image
             let mut opt_depth_image = None;
             if let Some(depth_handle) = pass.opt_depth_image {
-                opt_depth_image = Some(image_list.get_image_from_handle(depth_handle).expect(
-                    &format!(
-                        "Image with handle `{:?}` not found in the context.",
-                        depth_handle
-                    ),
-                ));
+                opt_depth_image = Some(
+                    image_list
+                        .get_image_from_handle(depth_handle)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Image with handle `{:?}` not found in the context.",
+                                depth_handle
+                            )
+                        }),
+                );
             }
 
             // Find output images
@@ -101,10 +105,12 @@ impl Graph {
                 .map(|output_handle| {
                     image_list
                         .get_image_from_handle(*output_handle)
-                        .expect(&format!(
-                            "Image with handle `{:?}` not found in the context.",
-                            output_handle
-                        ))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Image with handle `{:?}` not found in the context.",
+                                output_handle
+                            )
+                        })
                 })
                 .collect();
 
@@ -263,10 +269,12 @@ impl Graph {
 
                 let uniform_buffer = buffer_list
                     .get_buffer_from_handle(pass.uniform_buffer)
-                    .expect(&format!(
-                        "Uniform buffer with handle `{:?}` not found in the context.",
-                        pass.uniform_buffer
-                    ));
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Uniform buffer with handle `{:?}` not found in the context.",
+                            pass.uniform_buffer
+                        )
+                    });
                 let descriptor_buffer_info = [vk::DescriptorBufferInfo {
                     buffer: uniform_buffer.vk_buffer,
                     offset: 0,
@@ -313,16 +321,20 @@ impl Graph {
                 let main_function_name = CString::new("main").unwrap();
                 let vertex_shader = shader_list
                     .get_shader_from_handle(pass.vertex_shader)
-                    .expect(&format!(
-                        "Vertex shader with handle `{}` not found in the context.",
-                        pass.vertex_shader.0
-                    ));
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Vertex shader with handle `{}` not found in the context.",
+                            pass.vertex_shader.0
+                        )
+                    });
                 let fragment_shader = shader_list
                     .get_shader_from_handle(pass.fragment_shader)
-                    .expect(&format!(
-                        "Fragment shader with handle `{}` not found in the context.",
-                        pass.fragment_shader.0
-                    ));
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Fragment shader with handle `{}` not found in the context.",
+                            pass.fragment_shader.0
+                        )
+                    });
                 let shader_stages = [
                     vk::PipelineShaderStageCreateInfo {
                         stage: vk::ShaderStageFlags::VERTEX,
@@ -507,10 +519,7 @@ impl Graph {
             .built_passes
             .iter()
             .find(|&p| p.pass_handle == pass_handle)
-            .expect(&format!(
-                "Pass with handle `{}` not found in graph.",
-                pass_handle.0
-            ));
+            .unwrap_or_else(|| panic!("Pass with handle `{}` not found in graph.", pass_handle.0));
 
         let extent = vk::Extent2D {
             width: built_pass.viewport_width,

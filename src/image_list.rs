@@ -21,6 +21,7 @@ impl ImageList {
         ImageList { list: Vec::new() }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_image_relative_size(
         &mut self,
         name: &str,

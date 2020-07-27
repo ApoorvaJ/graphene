@@ -165,7 +165,7 @@ impl Context {
 
         Context {
             window,
-            event_loop: event_loop,
+            event_loop,
 
             shader_list,
             image_list,
@@ -232,6 +232,7 @@ impl Context {
             match event {
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::CloseRequested => is_running = false,
+                    #[allow(clippy::match_single_binding)] // TODO: Simplify  this
                     WindowEvent::KeyboardInput { input, .. } => match input {
                         KeyboardInput {
                             virtual_keycode,
@@ -433,13 +434,14 @@ impl Context {
         graph.end_pass(self.command_buffers[self.swapchain_idx]);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_pass(
         &self,
         graph_builder: &mut GraphBuilder,
         name: &str,
         vertex_shader: ShaderHandle,
         fragment_shader: ShaderHandle,
-        output_images: &Vec<ImageHandle>,
+        output_images: &[ImageHandle],
         opt_depth_image: Option<ImageHandle>,
         uniform_buffer: BufferHandle,
         image_handle: ImageHandle,
@@ -449,7 +451,7 @@ impl Context {
         let img = self
             .image_list
             .get_image_from_handle(image_handle)
-            .expect(&format!(
+            .unwrap_or_else(||panic!(
                 "Image with handle `{:?}` not found in the context.",
                 image_handle
             ));
@@ -458,7 +460,7 @@ impl Context {
             name: String::from(name),
             vertex_shader,
             fragment_shader,
-            output_images: output_images.clone(),
+            output_images: output_images.to_owned(),
             input_image: (img.image.image_view, environment_sampler.vk_sampler),
             opt_depth_image,
             viewport_width: self.facade.swapchain_width,

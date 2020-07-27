@@ -132,7 +132,7 @@ fn is_compilation_needed(source_path: &str, spirv_path: &str) -> bool {
 
     let src_meta = src_path
         .metadata()
-        .expect(&format!("Couldn't retrieve metadata for `{}`", spirv_path));
+        .unwrap_or_else(|_| panic!("Couldn't retrieve metadata for `{}`", spirv_path));
     if let Ok(dst_meta) = dst_path.metadata() {
         if let Ok(dst_modified) = dst_meta.modified() {
             let src_modified = src_meta.modified().unwrap();
@@ -183,8 +183,8 @@ fn get_shader_module(
     }
 
     // Read the spirv file
-    let spirv_u8 =
-        std::fs::read(spirv_path).expect(&format!("Failed to read spirv file `{}`", spirv_path));
+    let spirv_u8 = std::fs::read(spirv_path)
+        .unwrap_or_else(|_| panic!("Failed to read spirv file `{}`", spirv_path));
     // Create the shader module
     let spirv_u32 = {
         /* This is needed because std::fs::read returns a Vec<u8>, but Vulkan

@@ -26,6 +26,7 @@ impl Drop for Image {
 }
 
 impl Image {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
         width: u32,
@@ -142,14 +143,8 @@ impl Image {
             dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
             source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
             destination_stage = vk::PipelineStageFlags::TRANSFER;
-        } else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
-            && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
-        {
-            src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-            dst_access_mask = vk::AccessFlags::SHADER_READ;
-            source_stage = vk::PipelineStageFlags::TRANSFER;
-            destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
-        } else if old_layout == vk::ImageLayout::UNDEFINED
+        } else if (old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL
+            || old_layout == vk::ImageLayout::UNDEFINED)
             && new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
         {
             src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
@@ -208,7 +203,7 @@ impl Image {
             std::mem::size_of::<u8>() * image_width as usize * image_height as usize * 4;
         let image_data = image_object.to_rgba().into_raw();
 
-        if image_size <= 0 {
+        if image_size == 0 {
             panic!("Failed to load image.")
         }
 
