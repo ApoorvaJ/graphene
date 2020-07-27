@@ -27,14 +27,12 @@ impl BufferList {
             name.hash(&mut hasher);
             BufferHandle(hasher.finish())
         };
-        // TODO: Need more clarity on buffer creation API design
         // Error if name already exists
         if self.get_buffer_from_handle(handle).is_some() {
-            return Ok(handle);
-            // return Err(format!(
-            //     "A buffer with the same name `{}` already exists in the context.",
-            //     name
-            // ));
+            return Err(format!(
+                "A buffer with the same name `{}` already exists in the context.",
+                name
+            ));
         }
         // Create and insert new buffer
         let buffer = HostVisibleBuffer::new(name, size, usage, gpu, debug_utils);

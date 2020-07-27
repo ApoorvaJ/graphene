@@ -156,6 +156,19 @@ fn main() {
         )
         .unwrap();
 
+    // TODO: Avoid having to create the vec. Automatically
+    // creating a unique uniform buffer per frame
+    let uniform_buffers: Vec<graphene::BufferHandle> = (0..ctx.facade.num_frames)
+        .map(|i| {
+            ctx.new_buffer(
+                &format!("buffer_uniform_{}", i),
+                std::mem::size_of::<UniformBuffer>(),
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+            )
+            .unwrap()
+        })
+        .collect();
+
     loop {
         if !ctx.begin_frame() {
             break;
@@ -164,17 +177,10 @@ fn main() {
         let elapsed_seconds = start_instant.elapsed().as_secs_f32();
         let cmd_buf = ctx.command_buffers[ctx.swapchain_idx];
 
+        let uniform_buffer = uniform_buffers[ctx.swapchain_idx];
+
         // Build and execute render graph
         let mut graph_builder = graphene::GraphBuilder::new();
-        let uniform_buffer = ctx
-            .new_buffer(
-                // TODO: Avoid having the swapchain index, automatically
-                // creating a unique uniform buffer per pass and per graph
-                &format!("buffer_uniform_{}", ctx.swapchain_idx),
-                std::mem::size_of::<UniformBuffer>(),
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-            )
-            .unwrap();
         let pass_0 = ctx
             .add_pass(
                 &mut graph_builder,
