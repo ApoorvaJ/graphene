@@ -180,10 +180,8 @@ fn main() {
         let uniform_buffer = uniform_buffers[ctx.swapchain_idx];
 
         // Build and execute render graph
-        let mut graph_builder = graphene::GraphBuilder::new();
         let pass_lit = ctx
             .add_pass(
-                &mut graph_builder,
                 "lit",
                 shader_vertex,
                 shader_default,
@@ -196,7 +194,6 @@ fn main() {
             .unwrap();
         let pass_post = ctx
             .add_pass(
-                &mut graph_builder,
                 "post",
                 shader_fullscreen_triangle_vertex,
                 shader_aberration,
@@ -208,7 +205,7 @@ fn main() {
             )
             .unwrap();
 
-        let graph = ctx.build_graph(graph_builder);
+        let graph = ctx.build_graph();
         // Pass 0
         ctx.begin_pass(graph, pass_lit);
         execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh);

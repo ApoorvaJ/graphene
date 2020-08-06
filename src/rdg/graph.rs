@@ -1,7 +1,7 @@
 use crate::*;
 
 #[derive(Debug, Hash)]
-pub struct Pass {
+pub struct BuilderPass {
     pub name: String,
     pub vertex_shader: ShaderHandle,
     pub fragment_shader: ShaderHandle,
@@ -11,17 +11,6 @@ pub struct Pass {
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub uniform_buffer: BufferHandle,
-}
-
-#[derive(Hash)]
-pub struct GraphBuilder {
-    pub passes: Vec<(PassHandle, Pass)>,
-}
-
-impl GraphBuilder {
-    pub fn new() -> GraphBuilder {
-        GraphBuilder { passes: Vec::new() }
-    }
 }
 
 pub struct BuiltPass {
@@ -69,8 +58,8 @@ impl Drop for Graph {
 
 impl Graph {
     pub fn new(
-        graph_builder: GraphBuilder,
         gpu: &Gpu,
+        builder_passes: &Vec<(PassHandle, BuilderPass)>,
         shader_list: &ShaderList,
         buffer_list: &BufferList,
         image_list: &ImageList,
@@ -101,7 +90,7 @@ impl Graph {
 
         let mut shader_handles = Vec::new();
         let mut built_passes = Vec::new();
-        for (pass_handle, pass) in graph_builder.passes {
+        for (pass_handle, pass) in builder_passes {
             /* Record which shader handles have been used. This is needed for
             hot-reloading shaders. */
             shader_handles.push(pass.vertex_shader);
@@ -517,7 +506,7 @@ impl Graph {
             };
 
             built_passes.push(BuiltPass {
-                pass_handle,
+                pass_handle: pass_handle.clone(),
                 clear_values,
                 descriptor_set_layout,
                 descriptor_set,

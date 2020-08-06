@@ -21,6 +21,9 @@ pub struct Context {
     window: winit::window::Window,
     event_loop: winit::event_loop::EventLoop<()>,
 
+    // Graph being built in the current frame
+    pub builder_passes: Vec<(PassHandle, BuilderPass)>,
+
     pub shader_list: ShaderList,
     // TODO: Move these to the graph builder instead?
     pub image_list: ImageList,
@@ -167,6 +170,7 @@ impl Context {
             window,
             event_loop,
 
+            builder_passes: Vec::new(),
             shader_list,
             image_list,
             buffer_list,
@@ -188,11 +192,11 @@ impl Context {
         }
     }
 
-    pub fn build_graph(&mut self, graph_builder: GraphBuilder) -> GraphHandle {
+    pub fn build_graph(&mut self) -> GraphHandle {
         // Get the hash of the graph builder
         let req_hash: u64 = {
             let mut hasher = DefaultHasher::new();
-            graph_builder.hash(&mut hasher);
+            self.builder_passes.hash(&mut hasher);
             hasher.finish()
         };
         // Try finding the requested graph in the cache
@@ -206,8 +210,8 @@ impl Context {
             println!("Adding graph to cache");
             self.graph_cache.push((
                 Graph::new(
-                    graph_builder,
                     &self.gpu,
+                    &self.builder_passes,
                     &self.shader_list,
                     &self.buffer_list,
                     &self.image_list,
@@ -220,9 +224,12 @@ impl Context {
     }
 
     pub fn begin_frame(&mut self) -> bool {
+        // Clear the passes of the current graph
+        self.builder_passes.clear();
+
+        // Execute the event loop
         let mut is_running = true;
         let mut resize_needed = false;
-
         let swapchain_width = self.facade.swapchain_width;
         let swapchain_height = self.facade.swapchain_height;
 
@@ -436,8 +443,7 @@ impl Context {
 
     #[allow(clippy::too_many_arguments)]
     pub fn add_pass(
-        &self,
-        graph_builder: &mut GraphBuilder,
+        &mut self,
         name: &str,
         vertex_shader: ShaderHandle,
         fragment_shader: ShaderHandle,
@@ -458,7 +464,7 @@ impl Context {
                 )
             });
 
-        let pass = Pass {
+        let pass = BuilderPass {
             name: String::from(name),
             vertex_shader,
             fragment_shader,
@@ -476,7 +482,7 @@ impl Context {
             PassHandle(hasher.finish())
         };
 
-        graph_builder.passes.push((pass_handle, pass));
+        self.builder_passes.push((pass_handle, pass));
 
         Ok(pass_handle)
     }
