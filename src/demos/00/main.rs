@@ -181,10 +181,10 @@ fn main() {
 
         // Build and execute render graph
         let mut graph_builder = graphene::GraphBuilder::new();
-        let pass_0 = ctx
+        let pass_lit = ctx
             .add_pass(
                 &mut graph_builder,
-                "forward lit",
+                "lit",
                 shader_vertex,
                 shader_default,
                 &[temp_image],
@@ -194,10 +194,10 @@ fn main() {
                 &environment_sampler,
             )
             .unwrap();
-        let pass_1 = ctx
+        let pass_post = ctx
             .add_pass(
                 &mut graph_builder,
-                "forward lit 2",
+                "post",
                 shader_fullscreen_triangle_vertex,
                 shader_aberration,
                 &[ctx.facade.swapchain_images[ctx.swapchain_idx]],
@@ -210,7 +210,7 @@ fn main() {
 
         let graph = ctx.build_graph(graph_builder);
         // Pass 0
-        ctx.begin_pass(graph, pass_0);
+        ctx.begin_pass(graph, pass_lit);
         execute_pass(&mut ctx, elapsed_seconds, uniform_buffer, cmd_buf, &mesh);
         ctx.end_pass(graph);
         // Layout transition (TODO: Do this automatically in the render graph)
@@ -223,7 +223,7 @@ fn main() {
             );
         }
         // Pass 1
-        ctx.begin_pass(graph, pass_1);
+        ctx.begin_pass(graph, pass_post);
         unsafe {
             ctx.gpu.device.cmd_draw(cmd_buf, 3, 1, 0, 0);
         }

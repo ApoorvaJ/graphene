@@ -108,7 +108,7 @@ impl Context {
             winit::window::WindowBuilder::new()
                 .with_title(APP_NAME)
                 .with_inner_size(winit::dpi::LogicalSize::new(800, 600))
-                // .with_maximized(true)
+                .with_maximized(true)
                 .build(&event_loop)
                 .expect("Failed to create window.")
         };
@@ -451,10 +451,12 @@ impl Context {
         let img = self
             .image_list
             .get_image_from_handle(image_handle)
-            .unwrap_or_else(||panic!(
-                "Image with handle `{:?}` not found in the context.",
-                image_handle
-            ));
+            .unwrap_or_else(|| {
+                panic!(
+                    "Image with handle `{:?}` not found in the context.",
+                    image_handle
+                )
+            });
 
         let pass = Pass {
             name: String::from(name),
